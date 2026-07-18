@@ -437,7 +437,7 @@ internal sealed class SteamVrCompositorCaptureService : IDisposable
     {
         var poses = new TrackedDevicePose_t[OpenVR.k_unMaxTrackedDeviceCount];
         OpenVR.System.GetDeviceToAbsoluteTrackingPose(
-            ETrackingUniverseOrigin.TrackingUniverseStanding,
+            OpenVR.Compositor.GetTrackingSpace(),
             0f,
             poses);
         var pose = poses[OpenVR.k_unTrackedDeviceIndex_Hmd];

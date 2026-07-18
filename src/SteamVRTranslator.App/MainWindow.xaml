@@ -290,6 +290,9 @@
                             <Button x:Name="BindingsButton" Style="{StaticResource ActionButtonStyle}" Margin="8,0,0,0" Click="BindingsButton_Click" IsEnabled="False" ToolTip="打开本应用的 SteamVR 动作绑定页面。">
                                 <StackPanel Orientation="Horizontal"><Path Data="{x:Static local:MaterialIconPaths.GamepadVariant}" Width="16" Height="16" Stretch="Uniform" Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" /><TextBlock Text="SteamVR 按键绑定" Margin="7,0,0,0" /></StackPanel>
                             </Button>
+                            <Button x:Name="WpfOverlayButton" Style="{StaticResource ActionButtonStyle}" Margin="8,0,0,0" Click="WpfOverlayButton_Click" IsEnabled="False" ToolTip="把当前 WPF 管理器显示为空间窗口，用于测试抓握、光标、点击和滚轮。">
+                                <StackPanel Orientation="Horizontal"><Path Data="{x:Static local:MaterialIconPaths.Monitor}" Width="16" Height="16" Stretch="Uniform" Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" /><TextBlock x:Name="WpfOverlayButtonText" Text="在 VR 中显示管理器" Margin="7,0,0,0" /></StackPanel>
+                            </Button>
                         </StackPanel>
                     </StackPanel>
                 </ScrollViewer>

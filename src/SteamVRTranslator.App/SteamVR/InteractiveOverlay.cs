@@ -1,5 +1,6 @@
 using SteamVRTranslator.App.Translation;
 using SteamVRTranslator.Core.Geometry;
+using SteamVRTranslator.Core.Selection;
 using Valve.VR;
 
 namespace SteamVRTranslator.App.SteamVR;
@@ -7,7 +8,8 @@ namespace SteamVRTranslator.App.SteamVR;
 internal enum InteractiveOverlayKind
 {
     Capture,
-    Result
+    Result,
+    Window
 }
 
 internal sealed class InteractiveOverlay
@@ -31,6 +33,12 @@ internal sealed class InteractiveOverlay
     public DateTimeOffset LastRenderAt { get; set; }
 
     public int RenderCount { get; set; }
+
+    public OverlayPointerVisual? Pointer { get; set; }
+
+    public WpfWindowOverlaySource? WindowSource { get; init; }
+
+    public bool CanGrab { get; init; } = true;
 }
 
 internal readonly record struct OverlayContact(long OverlayId, float Distance);
@@ -47,9 +55,22 @@ internal readonly record struct OverlayGrab(
     SpatialSelectionPlane InitialPlane,
     TrackedHandPose InitialHand);
 
+internal readonly record struct OverlayPointerVisual(
+    ETrackedControllerRole Hand,
+    NormalizedPoint TexturePoint,
+    NormalizedPoint ContentPoint,
+    bool IsPressed);
+
+internal readonly record struct OverlayPointerCapture(
+    long OverlayId,
+    ETrackedControllerRole Hand,
+    NormalizedPoint LastTexturePoint,
+    NormalizedPoint LastContentPoint);
+
 internal static class SpatialOverlayInteraction
 {
     public const float ContactDistance = 0.05f;
+    public const float PointerPitchDegrees = 45f;
     private const float EdgeTolerance = 0.025f;
 
     public static bool TryContact(
@@ -80,6 +101,13 @@ internal static class SpatialOverlayInteraction
             Up = Rotate(grab.InitialPlane.Up, grab.InitialHand, currentHand).Normalized(),
             Normal = Rotate(grab.InitialPlane.Normal, grab.InitialHand, currentHand).Normalized()
         };
+    }
+
+    public static Vector3f PointerDirection(TrackedHandPose hand)
+    {
+        var radians = PointerPitchDegrees * (MathF.PI / 180f);
+        return ((hand.Forward * -MathF.Cos(radians)) +
+                (hand.Up * -MathF.Sin(radians))).Normalized();
     }
 
     private static Vector3f Rotate(

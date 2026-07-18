@@ -22,6 +22,7 @@ public partial class MainWindow : Window
     private AppConfiguration _configuration;
     private List<TranslationProviderConfiguration> _providers = [];
     private SteamVrTranslationRuntime? _runtime;
+    private long? _managerOverlayId;
     private bool _allowClose;
     private bool _closeInProgress;
     private bool _populatingProvider;
@@ -125,6 +126,7 @@ public partial class MainWindow : Window
             StartButtonIcon.Data = MaterialIconPaths.Stop;
             TestSelectionButton.IsEnabled = true;
             BindingsButton.IsEnabled = true;
+            WpfOverlayButton.IsEnabled = true;
             SetConfigurationControlsEnabled(false);
         }
         catch (Exception exception)
@@ -154,6 +156,47 @@ public partial class MainWindow : Window
         }
 
         _runtime.RequestOpenBindings();
+    }
+
+    private async void WpfOverlayButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_runtime is null)
+        {
+            return;
+        }
+
+        WpfOverlayButton.IsEnabled = false;
+        try
+        {
+            if (_managerOverlayId is { } overlayId)
+            {
+                await _runtime.CloseWindowAsync(overlayId);
+                _managerOverlayId = null;
+                WpfOverlayButtonText.Text = "在 VR 中显示管理器";
+                return;
+            }
+
+            _managerOverlayId = await _runtime.ShowWindowAsync(
+                this,
+                new WpfSpatialOverlayOptions
+                {
+                    Name = "SteamVR Translator Manager",
+                    WidthMeters = 0.92f,
+                    DistanceMeters = 0.8f,
+                    CanGrab = true,
+                    MaximumFramesPerSecond = 30
+                });
+            WpfOverlayButtonText.Text = "从 VR 中移除管理器";
+        }
+        catch (Exception exception)
+        {
+            _log.Error("切换 WPF 管理器空间窗口失败。", exception);
+            MessageBox.Show(this, exception.Message, "空间窗口失败", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            WpfOverlayButton.IsEnabled = _runtime is not null;
+        }
     }
 
     private void OpenLogButton_Click(object sender, RoutedEventArgs e)
@@ -450,6 +493,9 @@ public partial class MainWindow : Window
         RuntimeDot.Fill = new SolidColorBrush(Color.FromRgb(157, 165, 159));
         TestSelectionButton.IsEnabled = false;
         BindingsButton.IsEnabled = false;
+        WpfOverlayButton.IsEnabled = false;
+        WpfOverlayButtonText.Text = "在 VR 中显示管理器";
+        _managerOverlayId = null;
         SetConfigurationControlsEnabled(true);
         _log.Info("SteamVR 模块已停止。");
     }

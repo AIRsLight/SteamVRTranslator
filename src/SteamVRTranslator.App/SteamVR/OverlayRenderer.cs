@@ -24,14 +24,23 @@ internal sealed class OverlayRenderer
     public ResultRenderFrame RenderResults(
         ResultOverlaySnapshot snapshot,
         SpatialSelectionPlane plane,
-        bool highlighted = false) =>
-        OnUiThread(() => RenderResultsCore(snapshot, plane, highlighted));
+        bool highlighted = false,
+        OverlayPointerVisual? pointer = null) =>
+        OnUiThread(() => RenderResultsCore(snapshot, plane, highlighted, pointer));
 
     public byte[] RenderCapture(
         byte[] jpeg,
         SpatialSelectionPlane plane,
-        bool highlighted = false) =>
-        OnUiThread(() => RenderCaptureCore(jpeg, plane, highlighted));
+        bool highlighted = false,
+        OverlayPointerVisual? pointer = null) =>
+        OnUiThread(() => RenderCaptureCore(jpeg, plane, highlighted, pointer));
+
+    public byte[] RenderWindow(
+        WpfWindowOverlaySource source,
+        SpatialSelectionPlane plane,
+        bool highlighted = false,
+        OverlayPointerVisual? pointer = null) =>
+        OnUiThread(() => RenderWindowCore(source, plane, highlighted, pointer));
 
     private byte[] RenderSelectionCore(SelectionSnapshot snapshot, bool frameUsable)
     {
@@ -66,19 +75,25 @@ internal sealed class OverlayRenderer
     private ResultRenderFrame RenderResultsCore(
         ResultOverlaySnapshot snapshot,
         SpatialSelectionPlane plane,
-        bool highlighted)
+        bool highlighted,
+        OverlayPointerVisual? pointer)
     {
         var visual = new DrawingVisual();
         double maximumScroll;
         using (var drawing = visual.RenderOpen())
         {
             maximumScroll = DrawResultPanel(drawing, snapshot, plane, highlighted);
+            DrawPointer(drawing, pointer);
         }
 
         return new ResultRenderFrame(RenderVisual(visual), maximumScroll);
     }
 
-    private byte[] RenderCaptureCore(byte[] jpeg, SpatialSelectionPlane plane, bool highlighted)
+    private byte[] RenderCaptureCore(
+        byte[] jpeg,
+        SpatialSelectionPlane plane,
+        bool highlighted,
+        OverlayPointerVisual? pointer)
     {
         using var stream = new MemoryStream(jpeg, writable: false);
         var bitmap = new BitmapImage();
@@ -97,6 +112,28 @@ internal sealed class OverlayRenderer
                 null,
                 HighlightPen(highlighted),
                 panel);
+            DrawPointer(drawing, pointer);
+        }
+
+        return RenderVisual(visual);
+    }
+
+    private byte[] RenderWindowCore(
+        WpfWindowOverlaySource source,
+        SpatialSelectionPlane plane,
+        bool highlighted,
+        OverlayPointerVisual? pointer)
+    {
+        var panel = CalculateResultPanel(plane);
+        var bitmap = source.Render(
+            Math.Max(8, (int)Math.Ceiling(panel.Width)),
+            Math.Max(8, (int)Math.Ceiling(panel.Height)));
+        var visual = new DrawingVisual();
+        using (var drawing = visual.RenderOpen())
+        {
+            drawing.DrawImage(bitmap, panel);
+            drawing.DrawRectangle(null, HighlightPen(highlighted), panel);
+            DrawPointer(drawing, pointer);
         }
 
         return RenderVisual(visual);
@@ -229,6 +266,28 @@ internal sealed class OverlayRenderer
         highlighted
             ? new Pen(new SolidColorBrush(Color.FromArgb(255, 46, 229, 140)), 4)
             : new Pen(new SolidColorBrush(Color.FromArgb(230, 255, 255, 255)), 1.5);
+
+    private static void DrawPointer(DrawingContext drawing, OverlayPointerVisual? pointer)
+    {
+        if (pointer is not { } value)
+        {
+            return;
+        }
+
+        var center = new Point(
+            value.TexturePoint.X * Width,
+            value.TexturePoint.Y * Height);
+        var outer = new Pen(new SolidColorBrush(Color.FromArgb(235, 35, 39, 42)), 5);
+        var inner = new Pen(Brushes.White, value.IsPressed ? 4 : 2.5);
+        drawing.DrawEllipse(
+            value.IsPressed ? new SolidColorBrush(Color.FromArgb(150, 255, 255, 255)) : null,
+            outer,
+            center,
+            11,
+            11);
+        drawing.DrawEllipse(null, inner, center, 8, 8);
+        drawing.DrawEllipse(Brushes.White, null, center, 2.2, 2.2);
+    }
 
     internal static Rect CalculateResultPanel(SpatialSelectionPlane plane)
     {

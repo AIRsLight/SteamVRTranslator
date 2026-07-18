@@ -14,7 +14,7 @@ using Valve.VR;
 
 namespace SteamVRTranslator.App.SteamVR;
 
-public sealed class SteamVrTranslationRuntime : IAsyncDisposable
+public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOverlayHost
 {
     private const string GlobalActionSetPath = "/actions/global";
     private const string SelectionActionSetPath = "/actions/selection";
@@ -29,11 +29,11 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
     private const string ResultClickActionPath = "/actions/results/in/toggle_visibility";
     private const string LeftGripActionPath = "/actions/results/in/left_grip";
     private const string RightGripActionPath = "/actions/results/in/right_grip";
+    private const string LeftPointerClickActionPath = "/actions/results/in/left_pointer_click";
+    private const string RightPointerClickActionPath = "/actions/results/in/right_pointer_click";
     private const string VoiceInputPttActionPath = "/actions/voiceinput/in/ptt";
     private const int VoiceInputReleaseDebounceMilliseconds = 60;
     private const string SelectionOverlayKey = "io.steamvrtranslator.selection";
-    private const string SpatialSceneLeftOverlayKey = "io.steamvrtranslator.scene.left";
-    private const string SpatialSceneRightOverlayKey = "io.steamvrtranslator.scene.right";
     private const float InstructionPlaneDistance = 1.0f;
     private const float ResultPlaneDistance = 0.6f;
     private const float InstructionPlaneWidth = 1.1f;
@@ -47,6 +47,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
     private readonly List<InteractiveOverlay> _interactiveOverlays = [];
     private readonly ConcurrentQueue<ResultProgressUpdate> _resultUpdates = new();
     private readonly ConcurrentQueue<CommandButtonEvent> _commandButtonEvents = new();
+    private readonly ConcurrentQueue<WpfOverlayCommand> _wpfOverlayCommands = new();
     private readonly object _lifecycleSync = new();
     private readonly WasapiCommandRecorder _commandRecorder;
     private readonly WasapiCommandRecorder _voiceInputRecorder;
@@ -66,6 +67,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
     private DateTimeOffset _lastResultScrollAt;
     private long? _lastScrollTargetOverlayId;
     private ResultScrollBoundary _resultScrollBoundary;
+    private double _wpfWheelAccumulator;
     private SpatialSelectionPlane? _currentPlane;
     private SpatialSelectionPlane? _lockedPlane;
     private SpatialSelectionPlane? _capturePlane;
@@ -73,9 +75,11 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
     private bool _spatialOverlaysVisible = true;
     private long _nextOverlayId;
     private long? _interactionTargetOverlayId;
+    private ETrackedControllerRole? _interactionContactHand;
     private long? _commandTargetOverlayId;
     private long? _activeResultOverlayId;
     private OverlayGrab? _grab;
+    private OverlayPointerCapture? _pointerCapture;
     private bool _lastSelectionOrientationUsable = true;
     private bool _openVrInitialized;
     private bool _connected;
@@ -83,6 +87,8 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
     private bool _lastResultClickPressed;
     private bool _lastLeftGripPressed;
     private bool _lastRightGripPressed;
+    private bool _lastLeftPointerPressed;
+    private bool _lastRightPointerPressed;
     private bool _voiceInputPressed;
     private bool _voiceInputWasPhysicallyPressed;
     private long? _voiceInputReleaseCandidateAt;
@@ -93,8 +99,6 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
     private Task<SenseVoiceCommandTranscriber>? _speechWarmupTask;
     private string? _lastConnectionError;
     private ulong _selectionOverlayHandle = OpenVR.k_ulOverlayHandleInvalid;
-    private ulong _spatialSceneLeftOverlayHandle = OpenVR.k_ulOverlayHandleInvalid;
-    private ulong _spatialSceneRightOverlayHandle = OpenVR.k_ulOverlayHandleInvalid;
     private ulong _globalActionSetHandle = OpenVR.k_ulInvalidActionSetHandle;
     private ulong _selectionActionSetHandle = OpenVR.k_ulInvalidActionSetHandle;
     private ulong _resultsActionSetHandle = OpenVR.k_ulInvalidActionSetHandle;
@@ -108,10 +112,12 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
     private ulong _resultClickActionHandle = OpenVR.k_ulInvalidActionHandle;
     private ulong _leftGripActionHandle = OpenVR.k_ulInvalidActionHandle;
     private ulong _rightGripActionHandle = OpenVR.k_ulInvalidActionHandle;
+    private ulong _leftPointerClickActionHandle = OpenVR.k_ulInvalidActionHandle;
+    private ulong _rightPointerClickActionHandle = OpenVR.k_ulInvalidActionHandle;
     private ulong _voiceInputPttActionHandle = OpenVR.k_ulInvalidActionHandle;
     private D3D11OverlayTexture? _selectionOverlayTexture;
     private D3D11OverlayDevice? _overlayTextureDevice;
-    private SpatialOverlaySceneRenderer? _spatialSceneRenderer;
+    private SpatialQuadOverlayManager? _spatialOverlayManager;
 
     public SteamVrTranslationRuntime(AppConfiguration configuration, AppLog log)
     {
@@ -195,6 +201,8 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
             _cancellation = null;
         }
 
+        CancelPendingWpfOverlayCommands();
+
         Publish("已停止", SelectionState.Idle);
     }
 
@@ -220,6 +228,55 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
         Interlocked.Exchange(ref _openBindingsRequested, 1);
     }
 
+    public Task<long> ShowWindowAsync(
+        Window window,
+        WpfSpatialOverlayOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        if (!IsRunning)
+        {
+            return Task.FromException<long>(
+                new InvalidOperationException("SteamVR 服务尚未启动。"));
+        }
+
+        var completion = new TaskCompletionSource<long>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        _wpfOverlayCommands.Enqueue(
+            new ShowWpfOverlayCommand(
+                window,
+                (options ?? new WpfSpatialOverlayOptions()).Validated(),
+                completion));
+        return cancellationToken.CanBeCanceled
+            ? completion.Task.WaitAsync(cancellationToken)
+            : completion.Task;
+    }
+
+    public Task<bool> CloseWindowAsync(
+        long overlayId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!IsRunning)
+        {
+            return Task.FromResult(false);
+        }
+
+        var completion = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        _wpfOverlayCommands.Enqueue(new CloseWpfOverlayCommand(overlayId, completion));
+        return cancellationToken.CanBeCanceled
+            ? completion.Task.WaitAsync(cancellationToken)
+            : completion.Task;
+    }
+
+    public void InvalidateWindow(long overlayId)
+    {
+        if (IsRunning)
+        {
+            _wpfOverlayCommands.Enqueue(new InvalidateWpfOverlayCommand(overlayId));
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         await StopAsync();
@@ -236,6 +293,13 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
         _commandRecorder.Dispose();
         _voiceInputRecorder.Dispose();
         _vrChatOscOutput?.Dispose();
+        foreach (var source in _interactiveOverlays
+                     .Select(overlay => overlay.WindowSource)
+                     .OfType<WpfWindowOverlaySource>())
+        {
+            source.Dispose();
+        }
+        _interactiveOverlays.Clear();
         if (_speechWarmupTask is not null)
         {
             try
@@ -288,6 +352,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
                         continue;
                     }
 
+                    DrainWpfOverlayCommands();
                     PollFrame(cancellationToken);
                     await CompleteCaptureIfReadyAsync();
                     await CompleteSubmissionIfReadyAsync();
@@ -963,6 +1028,128 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
         _log.Info($"{DiagnosticTag()} [overlay] 恢复空间对象：原因={reason}，数量={_interactiveOverlays.Count}。");
     }
 
+    private void DrainWpfOverlayCommands()
+    {
+        while (_wpfOverlayCommands.TryDequeue(out var command))
+        {
+            try
+            {
+                switch (command)
+                {
+                    case ShowWpfOverlayCommand show:
+                    {
+                        var source = new WpfWindowOverlaySource(show.Window, show.Options);
+                        try
+                        {
+                            var plane = CreateWpfWindowPlane(source);
+                            var createdOverlay = AddInteractiveOverlay(
+                                InteractiveOverlayKind.Window,
+                                plane,
+                                capture: null,
+                                resultState: null,
+                                source,
+                                source.Options.CanGrab);
+                            _spatialOverlaysVisible = true;
+                            createdOverlay.IsDirty = true;
+                            _log.Info(
+                                $"[overlay] WPF 窗口已注册：Overlay={createdOverlay.Id}，" +
+                                $"名称={source.Options.Name}，宽度={plane.Width:F3}m，" +
+                                $"高宽比={source.AspectRatio:F3}。");
+                            show.Completion.TrySetResult(createdOverlay.Id);
+                        }
+                        catch
+                        {
+                            source.Dispose();
+                            throw;
+                        }
+                        break;
+                    }
+                    case CloseWpfOverlayCommand close:
+                    {
+                        var closingOverlay = FindOverlay(close.OverlayId);
+                        var removed = closingOverlay?.WindowSource is not null;
+                        if (removed)
+                        {
+                            RemoveInteractiveOverlay(close.OverlayId, "WPF 扩展接口关闭");
+                        }
+                        close.Completion.TrySetResult(removed);
+                        break;
+                    }
+                    case InvalidateWpfOverlayCommand invalidate:
+                        if (FindOverlay(invalidate.OverlayId) is { WindowSource: not null } invalidatedOverlay)
+                        {
+                            invalidatedOverlay.IsDirty = true;
+                        }
+                        break;
+                }
+            }
+            catch (Exception exception)
+            {
+                _log.Error("处理 WPF 空间窗口命令失败。", exception);
+                switch (command)
+                {
+                    case ShowWpfOverlayCommand show:
+                        show.Completion.TrySetException(exception);
+                        break;
+                    case CloseWpfOverlayCommand close:
+                        close.Completion.TrySetException(exception);
+                        break;
+                }
+            }
+        }
+    }
+
+    private void CancelPendingWpfOverlayCommands()
+    {
+        while (_wpfOverlayCommands.TryDequeue(out var command))
+        {
+            var exception = new OperationCanceledException("SteamVR 服务已停止。");
+            switch (command)
+            {
+                case ShowWpfOverlayCommand show:
+                    show.Completion.TrySetException(exception);
+                    break;
+                case CloseWpfOverlayCommand close:
+                    close.Completion.TrySetException(exception);
+                    break;
+            }
+        }
+    }
+
+    private SpatialSelectionPlane CreateWpfWindowPlane(WpfWindowOverlaySource source)
+    {
+        var poses = new TrackedDevicePose_t[OpenVR.k_unMaxTrackedDeviceCount];
+        OpenVR.System.GetDeviceToAbsoluteTrackingPose(
+            CurrentTrackingOrigin(),
+            0f,
+            poses);
+        var hmdPose = poses[OpenVR.k_unTrackedDeviceIndex_Hmd];
+        if (!hmdPose.bPoseIsValid)
+        {
+            throw new InvalidOperationException("头显姿态不可用，无法放置 WPF 窗口。");
+        }
+
+        var matrix = hmdPose.mDeviceToAbsoluteTracking;
+        var forward = Forward(matrix);
+        var right = Right(matrix);
+        var normal = forward * -1f;
+        var up = Vector3f.Cross(normal, right).Normalized();
+        var width = source.Options.WidthMeters;
+        var height = width / (float)source.AspectRatio;
+        var extent = MathF.Max(MathF.Max(width, height) * 1.08f, 0.12f);
+        return new SpatialSelectionPlane(
+            Position(matrix) + (forward * source.Options.DistanceMeters),
+            right,
+            up,
+            normal,
+            width,
+            height,
+            extent,
+            new NormalizedPoint(0f, 0f),
+            new NormalizedPoint(1f, 1f),
+            0f);
+    }
+
     private void StartSpeechWarmup()
     {
         if (_speechWarmupTask is not null)
@@ -1173,6 +1360,8 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
         ResolveAction(ResultClickActionPath, ref _resultClickActionHandle);
         ResolveAction(LeftGripActionPath, ref _leftGripActionHandle);
         ResolveAction(RightGripActionPath, ref _rightGripActionHandle);
+        ResolveAction(LeftPointerClickActionPath, ref _leftPointerClickActionHandle);
+        ResolveAction(RightPointerClickActionPath, ref _rightPointerClickActionHandle);
         ResolveAction(VoiceInputPttActionPath, ref _voiceInputPttActionHandle);
         CreateOverlays();
 
@@ -1192,36 +1381,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
             ref _selectionOverlayHandle);
         _selectionOverlayTexture = new D3D11OverlayTexture(_overlayTextureDevice);
         _selectionOverlayTexture.Attach(_selectionOverlayHandle);
-
-        CreateOverlay(
-            SpatialSceneLeftOverlayKey,
-            "SteamVR Translator Spatial Scene Left",
-            1f,
-            110,
-            ref _spatialSceneLeftOverlayHandle);
-        CreateOverlay(
-            SpatialSceneRightOverlayKey,
-            "SteamVR Translator Spatial Scene Right",
-            1f,
-            110,
-            ref _spatialSceneRightOverlayHandle);
-        EnsureOverlay(
-            OpenVR.Overlay.SetOverlayFlag(
-                _spatialSceneLeftOverlayHandle,
-                VROverlayFlags.IsPremultiplied,
-                true),
-            "设置左眼场景预乘 Alpha");
-        EnsureOverlay(
-            OpenVR.Overlay.SetOverlayFlag(
-                _spatialSceneRightOverlayHandle,
-                VROverlayFlags.IsPremultiplied,
-                true),
-            "设置右眼场景预乘 Alpha");
-        _spatialSceneRenderer = new SpatialOverlaySceneRenderer(
-            _overlayTextureDevice,
-            _log,
-            _spatialSceneLeftOverlayHandle,
-            _spatialSceneRightOverlayHandle);
+        _spatialOverlayManager = new SpatialQuadOverlayManager(_overlayTextureDevice, _log);
 
         SetHeadLockedSelectionOverlayTransform();
         foreach (var overlay in _interactiveOverlays)
@@ -1340,7 +1500,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
     {
         var poses = new TrackedDevicePose_t[OpenVR.k_unMaxTrackedDeviceCount];
         OpenVR.System.GetDeviceToAbsoluteTrackingPose(
-            ETrackingUniverseOrigin.TrackingUniverseStanding,
+            CurrentTrackingOrigin(),
             0f,
             poses);
         var hmdPose = poses[OpenVR.k_unTrackedDeviceIndex_Hmd];
@@ -1403,18 +1563,25 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
     {
         var leftGrip = ReadDigital(_leftGripActionHandle);
         var rightGrip = ReadDigital(_rightGripActionHandle);
+        var leftPointerPressed = ReadDigital(_leftPointerClickActionHandle);
+        var rightPointerPressed = ReadDigital(_rightPointerClickActionHandle);
         if (_interactiveOverlaysSuppressed || !_spatialOverlaysVisible || _interactiveOverlays.Count == 0)
         {
             SetInteractionTarget(null);
+            _interactionContactHand = null;
             _grab = null;
+            ResetOverlayPointer();
             _lastLeftGripPressed = leftGrip;
             _lastRightGripPressed = rightGrip;
+            _lastLeftPointerPressed = leftPointerPressed;
+            _lastRightPointerPressed = rightPointerPressed;
             return;
         }
 
+        var origin = CurrentTrackingOrigin();
         var poses = new TrackedDevicePose_t[OpenVR.k_unMaxTrackedDeviceCount];
         OpenVR.System.GetDeviceToAbsoluteTrackingPose(
-            ETrackingUniverseOrigin.TrackingUniverseStanding,
+            origin,
             0f,
             poses);
         var leftHand = ReadControllerPose(ETrackedControllerRole.LeftHand, poses);
@@ -1433,6 +1600,8 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
             else
             {
                 overlay.Plane = SpatialOverlayInteraction.Move(grab, hand.Value);
+                _spatialOverlayManager?.UpdateTransform(overlay.Id, overlay.Plane, origin);
+                _interactionContactHand = grab.Hand;
                 SetInteractionTarget(overlay.Id);
             }
         }
@@ -1441,7 +1610,14 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
         {
             var leftContact = leftHand is { } left ? FindContact(left.Position) : null;
             var rightContact = rightHand is { } right ? FindContact(right.Position) : null;
-            SetInteractionTarget(Closest(leftContact, rightContact)?.OverlayId);
+            var selectedContact = Closest(leftContact, rightContact);
+            _interactionContactHand = selectedContact is null
+                ? null
+                : leftContact is { } selectedLeft &&
+                  (rightContact is null || selectedLeft.Distance <= rightContact.Value.Distance)
+                    ? ETrackedControllerRole.LeftHand
+                    : ETrackedControllerRole.RightHand;
+            SetInteractionTarget(selectedContact?.OverlayId);
 
             if (leftGrip && !_lastLeftGripPressed && leftHand is { } leftPose && leftContact is { } leftHit)
             {
@@ -1453,19 +1629,177 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
             }
         }
 
+        UpdateOverlayPointer(
+            origin,
+            leftHand,
+            rightHand,
+            leftPointerPressed,
+            rightPointerPressed);
         _lastLeftGripPressed = leftGrip;
         _lastRightGripPressed = rightGrip;
+        _lastLeftPointerPressed = leftPointerPressed;
+        _lastRightPointerPressed = rightPointerPressed;
     }
+
+    private void UpdateOverlayPointer(
+        ETrackingUniverseOrigin origin,
+        TrackedHandPose? leftHand,
+        TrackedHandPose? rightHand,
+        bool leftPressed,
+        bool rightPressed)
+    {
+        var targetId = _pointerCapture?.OverlayId ?? _grab?.OverlayId ?? _interactionTargetOverlayId;
+        var contactHand = _grab?.Hand ?? _interactionContactHand;
+        var pointerHand = _pointerCapture?.Hand ?? Opposite(contactHand);
+        var target = targetId is { } id ? FindOverlay(id) : null;
+        if (target is null || pointerHand is null || _spatialOverlayManager is null)
+        {
+            ResetOverlayPointer();
+            return;
+        }
+
+        var pose = pointerHand == ETrackedControllerRole.LeftHand ? leftHand : rightHand;
+        var pressed = pointerHand == ETrackedControllerRole.LeftHand ? leftPressed : rightPressed;
+        var wasPressed = pointerHand == ETrackedControllerRole.LeftHand
+            ? _lastLeftPointerPressed
+            : _lastRightPointerPressed;
+        SpatialOverlayPointerHit? hit = null;
+        if (pose is { } handPose &&
+            _spatialOverlayManager.TryIntersect(
+                target.Id,
+                handPose.Position,
+                SpatialOverlayInteraction.PointerDirection(handPose),
+                origin,
+                target.Plane,
+                out var measuredHit))
+        {
+            hit = measuredHit;
+            target.WindowSource?.PointerMove(measuredHit.ContentPoint);
+            if (target.WindowSource is not null)
+            {
+                target.IsDirty = true;
+            }
+        }
+
+        if (pressed && !wasPressed && hit is { } downHit)
+        {
+            _pointerCapture = new OverlayPointerCapture(
+                target.Id,
+                pointerHand.Value,
+                downHit.TexturePoint,
+                downHit.ContentPoint);
+            target.WindowSource?.PointerDown(downHit.ContentPoint);
+            if (target.WindowSource is not null)
+            {
+                target.IsDirty = true;
+            }
+            _log.Info(
+                $"[pointer] 光标按下并锁定对象：Overlay={target.Id}，手={pointerHand}，" +
+                $"UV=({downHit.ContentPoint.X:F3},{downHit.ContentPoint.Y:F3})。");
+        }
+
+        if (_pointerCapture is { } capture && capture.OverlayId == target.Id)
+        {
+            if (hit is { } currentHit)
+            {
+                capture = capture with
+                {
+                    LastTexturePoint = currentHit.TexturePoint,
+                    LastContentPoint = currentHit.ContentPoint
+                };
+                _pointerCapture = capture;
+            }
+
+            SetPointerVisual(
+                target.Id,
+                new OverlayPointerVisual(
+                    capture.Hand,
+                    capture.LastTexturePoint,
+                    capture.LastContentPoint,
+                    pressed));
+            if (!pressed && wasPressed)
+            {
+                target.WindowSource?.PointerUp(capture.LastContentPoint);
+                if (target.WindowSource is not null)
+                {
+                    target.IsDirty = true;
+                }
+                _log.Info(
+                    $"[pointer] 光标松开对象：Overlay={capture.OverlayId}，手={capture.Hand}，" +
+                    $"UV=({capture.LastContentPoint.X:F3},{capture.LastContentPoint.Y:F3})。");
+                _pointerCapture = null;
+            }
+            return;
+        }
+
+        SetPointerVisual(
+            hit?.OverlayId,
+            hit is { } hoverHit
+                ? new OverlayPointerVisual(
+                    pointerHand.Value,
+                    hoverHit.TexturePoint,
+                    hoverHit.ContentPoint,
+                    false)
+                : null);
+    }
+
+    private void ResetOverlayPointer()
+    {
+        if (_pointerCapture is { } capture)
+        {
+            FindOverlay(capture.OverlayId)?.WindowSource?.CancelPointer();
+        }
+        _pointerCapture = null;
+        SetPointerVisual(null, null);
+    }
+
+    private void SetPointerVisual(long? overlayId, OverlayPointerVisual? pointer)
+    {
+        foreach (var overlay in _interactiveOverlays)
+        {
+            var next = overlay.Id == overlayId ? pointer : null;
+            if (PointerVisualEquals(overlay.Pointer, next))
+            {
+                continue;
+            }
+
+            overlay.Pointer = next;
+            overlay.IsDirty = true;
+        }
+    }
+
+    private static bool PointerVisualEquals(
+        OverlayPointerVisual? left,
+        OverlayPointerVisual? right)
+    {
+        if (left is null || right is null)
+        {
+            return left is null && right is null;
+        }
+
+        return left.Value.Hand == right.Value.Hand &&
+               left.Value.IsPressed == right.Value.IsPressed &&
+               MathF.Abs(left.Value.TexturePoint.X - right.Value.TexturePoint.X) * OverlayRenderer.Width < 0.75f &&
+               MathF.Abs(left.Value.TexturePoint.Y - right.Value.TexturePoint.Y) * OverlayRenderer.Height < 0.75f;
+    }
+
+    private static ETrackedControllerRole? Opposite(ETrackedControllerRole? hand) => hand switch
+    {
+        ETrackedControllerRole.LeftHand => ETrackedControllerRole.RightHand,
+        ETrackedControllerRole.RightHand => ETrackedControllerRole.LeftHand,
+        _ => null
+    };
 
     private void BeginGrab(long overlayId, ETrackedControllerRole hand, TrackedHandPose pose)
     {
         var overlay = FindOverlay(overlayId);
-        if (overlay is null)
+        if (overlay is null || !overlay.CanGrab)
         {
             return;
         }
 
         _grab = new OverlayGrab(overlayId, hand, overlay.Plane, pose);
+        _interactionContactHand = hand;
         SetInteractionTarget(overlayId);
         if (hand == ETrackedControllerRole.LeftHand)
         {
@@ -1517,6 +1851,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
             _lastResultClickPressed = false;
             _lastScrollTargetOverlayId = null;
             _resultScrollBoundary = ResultScrollBoundary.None;
+            _wpfWheelAccumulator = 0;
             return;
         }
 
@@ -1541,7 +1876,9 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
             else
             {
                 SetInteractionTarget(null);
+                _interactionContactHand = null;
                 _grab = null;
+                ResetOverlayPointer();
                 HideInteractiveOverlays();
             }
             PulseRight(0.035f, 100f, 0.3f);
@@ -1553,10 +1890,12 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
 
         _lastResultClickPressed = clickPressed;
         var scrollTarget = ResolveInteractionTarget();
-        if (!canControl || !_spatialOverlaysVisible || scrollTarget?.Result is not { } resultState)
+        if (!canControl || !_spatialOverlaysVisible || scrollTarget is null ||
+            (scrollTarget.Result is null && scrollTarget.WindowSource is null))
         {
             _lastScrollTargetOverlayId = null;
             _resultScrollBoundary = ResultScrollBoundary.None;
+            _wpfWheelAccumulator = 0;
             return;
         }
 
@@ -1564,6 +1903,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
         if (!scroll.bActive || ResultScrollMath.IsNeutral(scroll.y))
         {
             _resultScrollBoundary = ResultScrollBoundary.None;
+            _wpfWheelAccumulator = 0;
             return;
         }
 
@@ -1571,17 +1911,36 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
         {
             _lastScrollTargetOverlayId = scrollTarget.Id;
             _resultScrollBoundary = ResultScrollBoundary.None;
-        }
-
-        if (_resultScrollBoundary != ResultScrollBoundary.None)
-        {
-            return;
+            _wpfWheelAccumulator = 0;
         }
 
         var delta = ResultScrollMath.CalculateDelta(
             scroll.y,
             _configuration.InvertResultScroll,
             elapsed);
+        if (scrollTarget.WindowSource is { } windowSource)
+        {
+            _wpfWheelAccumulator += -delta * 4;
+            var wheelSteps = Math.Clamp((int)(_wpfWheelAccumulator / 120d), -4, 4);
+            if (wheelSteps != 0)
+            {
+                var wheelDelta = wheelSteps * 120;
+                _wpfWheelAccumulator -= wheelDelta;
+                windowSource.PointerWheel(
+                    scrollTarget.Pointer?.ContentPoint ?? new NormalizedPoint(0.5f, 0.5f),
+                    wheelDelta);
+                scrollTarget.IsDirty = true;
+            }
+            return;
+        }
+
+        var resultState = scrollTarget.Result!;
+
+        if (_resultScrollBoundary != ResultScrollBoundary.None)
+        {
+            return;
+        }
+
         var previousOffset = resultState.Snapshot()?.ScrollOffset ?? 0;
         if (resultState.Scroll(delta, scrollTarget.MaximumScroll))
         {
@@ -1688,20 +2047,33 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
     {
         if (_interactiveOverlaysSuppressed || !_spatialOverlaysVisible)
         {
-            _spatialSceneRenderer?.Hide();
+            _spatialOverlayManager?.HideAll();
             return;
         }
-        if (_spatialSceneRenderer is null)
+        if (_spatialOverlayManager is null)
         {
             return;
         }
 
         var now = DateTimeOffset.Now;
+        var origin = CurrentTrackingOrigin();
         foreach (var overlay in _interactiveOverlays)
         {
+            _spatialOverlayManager.UpdateTransform(overlay.Id, overlay.Plane, origin);
             RenderInteractiveOverlay(overlay, force, now);
+            _spatialOverlayManager.Show(overlay.Id);
+            overlay.IsShown = true;
         }
-        _spatialSceneRenderer.Render(_interactiveOverlays);
+
+        var poses = new TrackedDevicePose_t[OpenVR.k_unMaxTrackedDeviceCount];
+        OpenVR.System.GetDeviceToAbsoluteTrackingPose(origin, 0f, poses);
+        var hmdPose = poses[OpenVR.k_unTrackedDeviceIndex_Hmd];
+        if (hmdPose.bPoseIsValid)
+        {
+            _spatialOverlayManager.UpdateDepthOrder(
+                Position(hmdPose.mDeviceToAbsoluteTracking),
+                _interactiveOverlays);
+        }
     }
 
     private void RenderInteractiveOverlay(
@@ -1710,8 +2082,10 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
         DateTimeOffset? renderAt = null)
     {
         var now = renderAt ?? DateTimeOffset.Now;
-        if (_spatialSceneRenderer is null ||
-            (!force && (!overlay.IsDirty || now - overlay.LastRenderAt < TimeSpan.FromMilliseconds(33))))
+        var minimumInterval = overlay.WindowSource?.FrameInterval ?? TimeSpan.FromMilliseconds(33);
+        if (_spatialOverlayManager is null ||
+            (!force && now - overlay.LastRenderAt < minimumInterval) ||
+            (!force && !overlay.IsDirty && overlay.WindowSource is null))
         {
             return;
         }
@@ -1719,9 +2093,13 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
         var highlighted = _interactionTargetOverlayId == overlay.Id;
         if (overlay.Kind == InteractiveOverlayKind.Capture && overlay.Capture is { } capture)
         {
-            _spatialSceneRenderer.UpdateSurface(
+            _spatialOverlayManager.UpdatePixels(
                 overlay.Id,
-                _renderer.RenderCapture(capture.ImageBytes, overlay.Plane, highlighted));
+                _renderer.RenderCapture(
+                    capture.ImageBytes,
+                    overlay.Plane,
+                    highlighted,
+                    overlay.Pointer));
             overlay.RenderCount++;
             if (force || overlay.RenderCount == 1)
             {
@@ -1732,8 +2110,12 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
         }
         else if (overlay.Result?.Snapshot() is { } snapshot)
         {
-            var frame = _renderer.RenderResults(snapshot, overlay.Plane, highlighted);
-            _spatialSceneRenderer.UpdateSurface(overlay.Id, frame.Pixels);
+            var frame = _renderer.RenderResults(
+                snapshot,
+                overlay.Plane,
+                highlighted,
+                overlay.Pointer);
+            _spatialOverlayManager.UpdatePixels(overlay.Id, frame.Pixels);
             overlay.MaximumScroll = frame.MaximumScrollOffset;
             overlay.Result.ClampScroll(overlay.MaximumScroll);
             overlay.RenderCount++;
@@ -1746,12 +2128,28 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
                     $"滚动={snapshot.ScrollOffset:F0}，高亮={highlighted}，强制={force}");
             }
         }
+        else if (overlay.WindowSource is { } windowSource)
+        {
+            _spatialOverlayManager.UpdatePixels(
+                overlay.Id,
+                _renderer.RenderWindow(
+                    windowSource,
+                    overlay.Plane,
+                    highlighted,
+                    overlay.Pointer));
+            overlay.RenderCount++;
+            if (force || overlay.RenderCount == 1 || overlay.RenderCount % 300 == 0)
+            {
+                _log.Info(
+                    $"[overlay] WPF 窗口层已渲染：Overlay={overlay.Id}，" +
+                    $"名称={windowSource.Options.Name}，次数={overlay.RenderCount}。");
+            }
+        }
         else
         {
             return;
         }
 
-        overlay.IsShown = _spatialOverlaysVisible;
         overlay.IsDirty = false;
         overlay.LastRenderAt = now;
     }
@@ -1760,7 +2158,9 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
         InteractiveOverlayKind kind,
         SpatialSelectionPlane plane,
         CapturedFrame? capture,
-        ResultOverlayState? resultState)
+        ResultOverlayState? resultState,
+        WpfWindowOverlaySource? windowSource = null,
+        bool canGrab = true)
     {
         var overlay = new InteractiveOverlay
         {
@@ -1768,7 +2168,9 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
             Kind = kind,
             Plane = plane,
             Capture = capture,
-            Result = resultState
+            Result = resultState,
+            WindowSource = windowSource,
+            CanGrab = canGrab
         };
         _interactiveOverlays.Add(overlay);
         overlay.IsDirty = true;
@@ -1783,8 +2185,9 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
             return;
         }
 
-        _spatialSceneRenderer?.RemoveSurface(overlayId);
+        _spatialOverlayManager?.Remove(overlayId);
         _interactiveOverlays.Remove(overlay);
+        overlay.WindowSource?.Dispose();
         if (_grab?.OverlayId == overlayId)
         {
             _grab = null;
@@ -1796,6 +2199,10 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
         if (_commandTargetOverlayId == overlayId)
         {
             _commandTargetOverlayId = null;
+        }
+        if (_pointerCapture?.OverlayId == overlayId)
+        {
+            ResetOverlayPointer();
         }
         _log.Info($"[interaction] 空间对象已关闭：Overlay={overlayId}，原因={reason}，剩余={_interactiveOverlays.Count}。");
         Publish($"已关闭空间对象，当前剩余 {_interactiveOverlays.Count} 个。", SelectionState.Idle);
@@ -1834,7 +2241,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
     {
         var poses = new TrackedDevicePose_t[OpenVR.k_unMaxTrackedDeviceCount];
         OpenVR.System.GetDeviceToAbsoluteTrackingPose(
-            ETrackingUniverseOrigin.TrackingUniverseStanding,
+            CurrentTrackingOrigin(),
             0f,
             poses);
         var hmdPose = poses[OpenVR.k_unTrackedDeviceIndex_Hmd];
@@ -1901,7 +2308,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
         EnsureOverlay(
             OpenVR.Overlay.SetOverlayTransformAbsolute(
                 _selectionOverlayHandle,
-                ETrackingUniverseOrigin.TrackingUniverseStanding,
+                CurrentTrackingOrigin(),
                 ref transform),
             "设置双手空间框选平面");
     }
@@ -1914,6 +2321,9 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
 
     private static Vector3f Right(HmdMatrix34_t matrix) =>
         new Vector3f(matrix.m0, matrix.m4, matrix.m8).Normalized();
+
+    private static ETrackingUniverseOrigin CurrentTrackingOrigin() =>
+        OpenVR.Compositor.GetTrackingSpace();
 
     private void ShowSelectionOverlay() =>
         EnsureOverlay(OpenVR.Overlay.ShowOverlay(_selectionOverlayHandle), "显示选择叠加层");
@@ -1929,7 +2339,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
 
     private void HideInteractiveOverlays()
     {
-        _spatialSceneRenderer?.Hide();
+        _spatialOverlayManager?.HideAll();
         foreach (var overlay in _interactiveOverlays)
         {
             overlay.IsShown = false;
@@ -2001,7 +2411,11 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
         _lastResultClickPressed = false;
         _lastLeftGripPressed = false;
         _lastRightGripPressed = false;
+        _lastLeftPointerPressed = false;
+        _lastRightPointerPressed = false;
+        ResetOverlayPointer();
         _interactionTargetOverlayId = null;
+        _interactionContactHand = null;
         _grab = null;
         _voiceInputPressed = false;
         _voiceInputWasPhysicallyPressed = false;
@@ -2032,17 +2446,12 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
             }
         }
         _ = SetVrChatTypingSafeAsync(false, CancellationToken.None);
-        _spatialSceneRenderer?.Dispose();
-        _spatialSceneRenderer = null;
+        _spatialOverlayManager?.Dispose();
+        _spatialOverlayManager = null;
         if (_openVrInitialized)
         {
             _pipeline.ReleaseOpenVrResources();
-            var handles = new[]
-            {
-                _selectionOverlayHandle,
-                _spatialSceneLeftOverlayHandle,
-                _spatialSceneRightOverlayHandle
-            };
+            var handles = new[] { _selectionOverlayHandle };
             foreach (var handle in handles)
             {
                 if (handle == OpenVR.k_ulOverlayHandleInvalid)
@@ -2070,8 +2479,6 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
 
         _openVrInitialized = false;
         _selectionOverlayHandle = OpenVR.k_ulOverlayHandleInvalid;
-        _spatialSceneLeftOverlayHandle = OpenVR.k_ulOverlayHandleInvalid;
-        _spatialSceneRightOverlayHandle = OpenVR.k_ulOverlayHandleInvalid;
         _globalActionSetHandle = OpenVR.k_ulInvalidActionSetHandle;
         _selectionActionSetHandle = OpenVR.k_ulInvalidActionSetHandle;
         _resultsActionSetHandle = OpenVR.k_ulInvalidActionSetHandle;
@@ -2085,6 +2492,8 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable
         _resultClickActionHandle = OpenVR.k_ulInvalidActionHandle;
         _leftGripActionHandle = OpenVR.k_ulInvalidActionHandle;
         _rightGripActionHandle = OpenVR.k_ulInvalidActionHandle;
+        _leftPointerClickActionHandle = OpenVR.k_ulInvalidActionHandle;
+        _rightPointerClickActionHandle = OpenVR.k_ulInvalidActionHandle;
         _voiceInputPttActionHandle = OpenVR.k_ulInvalidActionHandle;
     }
 

@@ -13,7 +13,8 @@ public sealed class SteamVrManifestTests
         var assembly = typeof(SteamVrManifestStore).Assembly;
         var actions = ReadResource(assembly, "translator_actions.json");
         Assert.Contains("/actions/results/in/toggle_visibility", actions);
-        Assert.DoesNotContain("/actions/results/in/click", actions);
+        Assert.Contains("/actions/results/in/left_pointer_click", actions);
+        Assert.Contains("/actions/results/in/right_pointer_click", actions);
 
         foreach (var binding in new[]
                  {
@@ -28,7 +29,8 @@ public sealed class SteamVrManifestTests
             using var _ = JsonDocument.Parse(json);
             Assert.Contains("/actions/results/in/scroll", json);
             Assert.Contains("/actions/results/in/toggle_visibility", json);
-            Assert.DoesNotContain("/user/hand/right/input/trigger", ResultsSection(json));
+            Assert.Contains("/actions/results/in/left_pointer_click", ResultsSection(json));
+            Assert.Contains("/actions/results/in/right_pointer_click", ResultsSection(json));
         }
     }
 
@@ -55,6 +57,8 @@ public sealed class SteamVrManifestTests
         var actions = ReadResource(assembly, "translator_actions.json");
         Assert.Contains("/actions/results/in/left_grip", actions);
         Assert.Contains("/actions/results/in/right_grip", actions);
+        Assert.Contains("/actions/results/in/left_pointer_click", actions);
+        Assert.Contains("/actions/results/in/right_pointer_click", actions);
 
         foreach (var binding in new[]
                  {
@@ -70,6 +74,8 @@ public sealed class SteamVrManifestTests
             Assert.Contains("/actions/results/in/left_grip", json);
             Assert.Contains("/actions/results/in/right_grip", json);
             Assert.Contains("/actions/results/in/toggle_visibility", json);
+            Assert.Contains("/actions/results/in/left_pointer_click", json);
+            Assert.Contains("/actions/results/in/right_pointer_click", json);
         }
     }
 

@@ -108,4 +108,34 @@ public sealed class OverlayRendererTests
         Assert.Equal(0, state.Snapshot()!.ScrollOffset);
         Assert.True(top.Pixels.SequenceEqual(topAgain.Pixels));
     }
+
+    [Fact]
+    public void PointerIsCompositedIntoCaptureTexture()
+    {
+        var renderer = new OverlayRenderer();
+        var plane = new SpatialSelectionPlane(
+            default,
+            new Vector3f(1, 0, 0),
+            new Vector3f(0, 1, 0),
+            new Vector3f(0, 0, 1),
+            0.4f,
+            0.3f,
+            0.46f,
+            default,
+            default,
+            0);
+        var state = new ResultOverlayState();
+        var requestId = state.Begin("pointer test");
+        state.Complete(requestId, "pointer test", false);
+
+        var plain = renderer.RenderResults(state.Snapshot()!, plane).Pixels;
+        var pointer = new OverlayPointerVisual(
+            Valve.VR.ETrackedControllerRole.RightHand,
+            new NormalizedPoint(0.5f, 0.5f),
+            new NormalizedPoint(0.5f, 0.5f),
+            false);
+        var withPointer = renderer.RenderResults(state.Snapshot()!, plane, pointer: pointer).Pixels;
+
+        Assert.False(plain.SequenceEqual(withPointer));
+    }
 }

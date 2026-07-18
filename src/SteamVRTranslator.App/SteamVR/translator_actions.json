@@ -16,6 +16,8 @@
     { "name": "/actions/results/in/toggle_visibility", "type": "boolean" },
     { "name": "/actions/results/in/left_grip", "type": "boolean" },
     { "name": "/actions/results/in/right_grip", "type": "boolean" },
+    { "name": "/actions/results/in/left_pointer_click", "type": "boolean" },
+    { "name": "/actions/results/in/right_pointer_click", "type": "boolean" },
     { "name": "/actions/voiceinput/in/ptt", "type": "boolean" }
   ],
   "action_sets": [
@@ -39,6 +41,8 @@
       "/actions/results/in/toggle_visibility": "Show or hide all spatial overlays",
       "/actions/results/in/left_grip": "Grab overlay with left hand",
       "/actions/results/in/right_grip": "Grab overlay with right hand",
+      "/actions/results/in/left_pointer_click": "Click overlay pointer with left hand",
+      "/actions/results/in/right_pointer_click": "Click overlay pointer with right hand",
       "/actions/voiceinput": "VRChat voice input",
       "/actions/voiceinput/in/ptt": "Push to talk"
     },
@@ -56,6 +60,8 @@
       "/actions/results/in/toggle_visibility": "显示或隐藏全部空间叠加层",
       "/actions/results/in/left_grip": "左手抓取叠加层",
       "/actions/results/in/right_grip": "右手抓取叠加层",
+      "/actions/results/in/left_pointer_click": "左手光标点击",
+      "/actions/results/in/right_pointer_click": "右手光标点击",
       "/actions/voiceinput": "VRChat 语音输入",
       "/actions/voiceinput/in/ptt": "按住说话"
     }

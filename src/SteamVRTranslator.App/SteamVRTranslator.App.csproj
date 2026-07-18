@@ -12,7 +12,6 @@
     <ProjectReference Include="..\SteamVRTranslator.Core\SteamVRTranslator.Core.csproj" />
     <ProjectReference Include="..\SteamVRTranslator.OpenVR\SteamVRTranslator.OpenVR.csproj" />
     <PackageReference Include="NAudio" Version="2.2.1" />
-    <PackageReference Include="Vortice.D3DCompiler" Version="3.8.3" />
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
     <EmbeddedResource Include="SteamVR\*.json" />
   </ItemGroup>

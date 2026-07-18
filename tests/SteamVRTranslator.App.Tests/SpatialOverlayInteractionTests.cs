@@ -58,4 +58,21 @@ public sealed class SpatialOverlayInteractionTests
         Assert.Equal(Plane.Up, moved.Up);
         Assert.Equal(new Vector3f(1, 0, 0), moved.Normal);
     }
+
+    [Fact]
+    public void PointerDirectionUsesControllerForwardWithDownwardPitch()
+    {
+        var hand = new TrackedHandPose(
+            default,
+            new Vector3f(1, 0, 0),
+            new Vector3f(0, 1, 0),
+            new Vector3f(0, 0, 1));
+
+        var direction = SpatialOverlayInteraction.PointerDirection(hand);
+
+        Assert.Equal(0, direction.X, 5);
+        Assert.Equal(-MathF.Sqrt(0.5f), direction.Y, 5);
+        Assert.Equal(-MathF.Sqrt(0.5f), direction.Z, 5);
+        Assert.Equal(1, direction.Length, 5);
+    }
 }

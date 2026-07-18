@@ -107,14 +107,27 @@ internal sealed class D3D11OverlayTexture : IDisposable
 {
     private readonly D3D11OverlayDevice _device;
     private readonly ID3D11Texture2D[] _textures;
+    private readonly int _width;
+    private readonly int _height;
     private ulong _overlayHandle = OpenVR.k_ulOverlayHandleInvalid;
     private int _nextTextureIndex;
 
-    public D3D11OverlayTexture(D3D11OverlayDevice device, int bufferCount = 2)
+    public D3D11OverlayTexture(
+        D3D11OverlayDevice device,
+        int width = OverlayRenderer.Width,
+        int height = OverlayRenderer.Height,
+        int bufferCount = 2)
     {
+        ArgumentOutOfRangeException.ThrowIfLessThan(width, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(height, 1);
         _device = device;
+        _width = width;
+        _height = height;
         _textures = Enumerable.Range(0, Math.Max(1, bufferCount))
-            .Select(_ => device.CreateTexture())
+            .Select(_ => device.CreateTexture(
+                width,
+                height,
+                BindFlags.ShaderResource | BindFlags.RenderTarget))
             .ToArray();
     }
 
@@ -141,9 +154,9 @@ internal sealed class D3D11OverlayTexture : IDisposable
         _nextTextureIndex = 0;
     }
 
-    private static void ValidatePixels(byte[] rgba)
+    private void ValidatePixels(byte[] rgba)
     {
-        var expectedLength = checked(OverlayRenderer.Width * OverlayRenderer.Height * 4);
+        var expectedLength = checked(_width * _height * 4);
         if (rgba.Length != expectedLength)
         {
             throw new ArgumentException(
@@ -154,7 +167,7 @@ internal sealed class D3D11OverlayTexture : IDisposable
 
     private void UploadAndSubmit(ID3D11Texture2D textureResource, byte[] rgba)
     {
-        _device.Upload(textureResource, rgba);
+        _device.Upload(textureResource, rgba, _width, _height);
         var texture = new Texture_t
         {
             handle = textureResource.NativePointer,
