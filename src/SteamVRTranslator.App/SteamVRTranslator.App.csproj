@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <AssemblyName>SteamVRTranslator</AssemblyName>
+    <RootNamespace>SteamVRTranslator.App</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SteamVRTranslator.Core\SteamVRTranslator.Core.csproj" />
+    <ProjectReference Include="..\SteamVRTranslator.OpenVR\SteamVRTranslator.OpenVR.csproj" />
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="Vortice.D3DCompiler" Version="3.8.3" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+    <EmbeddedResource Include="SteamVR\*.json" />
+  </ItemGroup>
+  <ItemGroup Condition="Exists('..\..\third_party\openvr\openvr_api.dll')">
+    <None Include="..\..\third_party\openvr\openvr_api.dll" Link="openvr_api.dll" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

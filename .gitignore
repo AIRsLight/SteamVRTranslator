@@ -1,0 +1,10 @@
+bin/
+obj/
+.vs/
+artifacts/
+captures/
+appsettings.json
+third_party/openvr/openvr_api.dll
+*.user
+*.suo
+

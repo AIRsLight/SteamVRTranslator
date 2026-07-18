@@ -1,0 +1,63 @@
+{
+  "default_bindings": [
+    { "controller_type": "generic", "binding_url": "bindings_generic.json" },
+    { "controller_type": "vive_controller", "binding_url": "bindings_vive_controller.json" },
+    { "controller_type": "knuckles", "binding_url": "bindings_knuckles.json" },
+    { "controller_type": "oculus_touch", "binding_url": "bindings_oculus_touch.json" },
+    { "controller_type": "holographic_controller", "binding_url": "bindings_holographic_controller.json" }
+  ],
+  "actions": [
+    { "name": "/actions/global/in/toggle", "type": "boolean" },
+    { "name": "/actions/selection/in/left_trigger", "type": "boolean" },
+    { "name": "/actions/selection/in/right_trigger", "type": "boolean" },
+    { "name": "/actions/selection/out/left_haptic", "type": "vibration" },
+    { "name": "/actions/selection/out/right_haptic", "type": "vibration" },
+    { "name": "/actions/results/in/scroll", "type": "vector2" },
+    { "name": "/actions/results/in/toggle_visibility", "type": "boolean" },
+    { "name": "/actions/results/in/left_grip", "type": "boolean" },
+    { "name": "/actions/results/in/right_grip", "type": "boolean" },
+    { "name": "/actions/voiceinput/in/ptt", "type": "boolean" }
+  ],
+  "action_sets": [
+    { "name": "/actions/global", "usage": "single" },
+    { "name": "/actions/selection", "usage": "single" },
+    { "name": "/actions/results", "usage": "single" },
+    { "name": "/actions/voiceinput", "usage": "single" }
+  ],
+  "localization": [
+    {
+      "language_tag": "en_US",
+      "/actions/global": "Translation",
+      "/actions/global/in/toggle": "Select, translate, or hold for a voice command",
+      "/actions/selection": "Translation region selection",
+      "/actions/selection/in/left_trigger": "Left selection trigger",
+      "/actions/selection/in/right_trigger": "Right selection trigger",
+      "/actions/selection/out/left_haptic": "Left selection feedback",
+      "/actions/selection/out/right_haptic": "Right selection feedback",
+      "/actions/results": "Spatial captures and results",
+      "/actions/results/in/scroll": "Scroll translation result",
+      "/actions/results/in/toggle_visibility": "Show or hide all spatial overlays",
+      "/actions/results/in/left_grip": "Grab overlay with left hand",
+      "/actions/results/in/right_grip": "Grab overlay with right hand",
+      "/actions/voiceinput": "VRChat voice input",
+      "/actions/voiceinput/in/ptt": "Push to talk"
+    },
+    {
+      "language_tag": "zh_CN",
+      "/actions/global": "图像翻译",
+      "/actions/global/in/toggle": "框选、短按翻译或按住输入语音命令",
+      "/actions/selection": "翻译范围选择",
+      "/actions/selection/in/left_trigger": "左手选择扳机",
+      "/actions/selection/in/right_trigger": "右手选择扳机",
+      "/actions/selection/out/left_haptic": "左手选择反馈",
+      "/actions/selection/out/right_haptic": "右手选择反馈",
+      "/actions/results": "空间截图与结果",
+      "/actions/results/in/scroll": "滚动翻译结果",
+      "/actions/results/in/toggle_visibility": "显示或隐藏全部空间叠加层",
+      "/actions/results/in/left_grip": "左手抓取叠加层",
+      "/actions/results/in/right_grip": "右手抓取叠加层",
+      "/actions/voiceinput": "VRChat 语音输入",
+      "/actions/voiceinput/in/ptt": "按住说话"
+    }
+  ]
+}

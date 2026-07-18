@@ -1,0 +1,441 @@
+<Window x:Class="SteamVRTranslator.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:SteamVRTranslator.App"
+        Title="SteamVR Translator" Width="1120" Height="760"
+        MinWidth="920" MinHeight="640"
+        Background="#F3F4F2" FontFamily="Segoe UI Variable, Segoe UI"
+        WindowStartupLocation="CenterScreen">
+    <Window.Resources>
+        <SolidColorBrush x:Key="AccentBrush" Color="#087E72" />
+        <SolidColorBrush x:Key="AccentHoverBrush" Color="#066C62" />
+        <SolidColorBrush x:Key="AccentSoftBrush" Color="#E3F1EE" />
+        <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFFF" />
+        <SolidColorBrush x:Key="MutedSurfaceBrush" Color="#F7F8F6" />
+        <SolidColorBrush x:Key="BorderBrush" Color="#D9DED9" />
+        <SolidColorBrush x:Key="TextBrush" Color="#202622" />
+        <SolidColorBrush x:Key="MutedTextBrush" Color="#66706A" />
+
+        <Style x:Key="ActionButtonStyle" TargetType="Button">
+            <Setter Property="Height" Value="34" />
+            <Setter Property="MinWidth" Value="34" />
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="Background" Value="White" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="#C9D0CB" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Border" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="5" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="#EEF1EE" />
+                                <Setter TargetName="Border" Property="BorderBrush" Value="#9FA9A2" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="#E2E7E3" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45" />
+                                <Setter Property="Cursor" Value="Arrow" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="PrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource ActionButtonStyle}">
+            <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Border" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
+                                CornerRadius="5" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="{StaticResource AccentHoverBrush}" />
+                                <Setter TargetName="Border" Property="BorderBrush" Value="{StaticResource AccentHoverBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="NavButtonStyle" TargetType="Button">
+            <Setter Property="Height" Value="38" />
+            <Setter Property="Margin" Value="0,2" />
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="#C9D2CC" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Border" Background="{TemplateBinding Background}" CornerRadius="5"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="#313B36" />
+                                <Setter Property="Foreground" Value="White" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="TextBox">
+            <Setter Property="MinHeight" Value="36" />
+            <Setter Property="Padding" Value="10,7" />
+            <Setter Property="Background" Value="White" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="#C8D0CA" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+
+        <Style TargetType="PasswordBox">
+            <Setter Property="MinHeight" Value="36" />
+            <Setter Property="Padding" Value="10,7" />
+            <Setter Property="Background" Value="White" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="#C8D0CA" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="Padding" Value="10,6" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Style.Triggers>
+                <Trigger Property="IsHighlighted" Value="True"><Setter Property="Background" Value="{StaticResource AccentSoftBrush}" /></Trigger>
+                <Trigger Property="IsSelected" Value="True"><Setter Property="Background" Value="#D4EAE5" /></Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style TargetType="ComboBox">
+            <Setter Property="MinHeight" Value="36" />
+            <Setter Property="Padding" Value="10,6" />
+            <Setter Property="Background" Value="White" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="#C8D0CA" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+
+        <Style x:Key="SectionStyle" TargetType="Border">
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="0,0,0,1" />
+            <Setter Property="Padding" Value="0,0,0,22" />
+            <Setter Property="Margin" Value="0,0,0,22" />
+        </Style>
+
+        <Style x:Key="FieldLabelStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="218" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Column="0" Background="#202824" Padding="12,18,12,14">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Border BorderBrush="#35403A" BorderThickness="0,0,0,1" Padding="10,0,10,16">
+                    <StackPanel Orientation="Horizontal">
+                        <Border Width="32" Height="32" CornerRadius="6" Background="#D8EEE9">
+                            <Path Data="{x:Static local:MaterialIconPaths.Steam}" Width="18" Height="18"
+                                  Stretch="Uniform" Fill="#075F57" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Text="VR Translator" Foreground="White" FontSize="14" FontWeight="SemiBold" />
+                            <TextBlock Text="SteamVR companion" Foreground="#AEB9B2" FontSize="10" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <StackPanel Grid.Row="1" Margin="0,16,0,0">
+                    <Button x:Name="CaptureNavButton" Style="{StaticResource NavButtonStyle}" Tag="capture" Click="NavigateButton_Click">
+                        <StackPanel Orientation="Horizontal"><Grid Width="28"><Path Data="{x:Static local:MaterialIconPaths.CogOutline}" Width="16" Height="16" Stretch="Uniform" Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" /></Grid><TextBlock Text="图像翻译" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" /></StackPanel>
+                    </Button>
+                    <Button x:Name="ProviderNavButton" Style="{StaticResource NavButtonStyle}" Tag="providers" Click="NavigateButton_Click">
+                        <StackPanel Orientation="Horizontal"><Grid Width="28"><Path Data="{x:Static local:MaterialIconPaths.CloudOutline}" Width="16" Height="16" Stretch="Uniform" Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" /></Grid><TextBlock Text="模型提供商" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" /></StackPanel>
+                    </Button>
+                    <Button x:Name="VoiceNavButton" Style="{StaticResource NavButtonStyle}" Tag="voice" Click="NavigateButton_Click">
+                        <StackPanel Orientation="Horizontal"><Grid Width="28"><Path Data="{x:Static local:MaterialIconPaths.Microphone}" Width="16" Height="16" Stretch="Uniform" Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" /></Grid><TextBlock Text="VRChat 语音" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" /></StackPanel>
+                    </Button>
+                    <Button x:Name="DiagnosticsNavButton" Style="{StaticResource NavButtonStyle}" Tag="diagnostics" Click="NavigateButton_Click">
+                        <StackPanel Orientation="Horizontal"><Grid Width="28"><Path Data="{x:Static local:MaterialIconPaths.ChartBoxOutline}" Width="16" Height="16" Stretch="Uniform" Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" /></Grid><TextBlock Text="诊断" Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" /></StackPanel>
+                    </Button>
+                </StackPanel>
+
+                <Border Grid.Row="2" BorderBrush="#35403A" BorderThickness="0,1,0,0" Padding="10,12,10,0">
+                    <StackPanel>
+                        <TextBlock x:Name="VersionText" Foreground="#AEB9B2" FontSize="10" />
+                        <TextBlock Text="Native WPF" Foreground="#AEB9B2" FontSize="10" Margin="0,3,0,0" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Column="1" Background="White">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="64" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="24,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock x:Name="PageTitleText" Text="图像翻译" FontSize="18" FontWeight="SemiBold" />
+                        <TextBlock x:Name="PageContextText" Text="SteamVR 单眼捕获、空间框选与结果交互" Foreground="{StaticResource MutedTextBrush}" FontSize="10" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,16,0">
+                        <Ellipse x:Name="RuntimeDot" Width="8" Height="8" Fill="#9DA59F" Margin="0,0,7,0" />
+                        <StackPanel>
+                            <TextBlock x:Name="StateText" Text="IDLE" FontSize="10" FontWeight="SemiBold" />
+                            <TextBlock x:Name="StatusText" Text="未启动" Foreground="{StaticResource MutedTextBrush}" FontSize="10" MaxWidth="300" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                    </StackPanel>
+                    <Button x:Name="StartButton" Grid.Column="2" Style="{StaticResource PrimaryButtonStyle}" Width="102" Click="StartButton_Click" ToolTip="启动或停止 SteamVR 图像翻译与语音输入服务。">
+                        <StackPanel Orientation="Horizontal">
+                            <Path x:Name="StartButtonIcon" Data="{x:Static local:MaterialIconPaths.Play}" Width="15" Height="15" Stretch="Uniform" Fill="White" VerticalAlignment="Center" />
+                            <TextBlock x:Name="StartButtonText" Text="启动服务" Foreground="White" Margin="7,0,0,0" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
+            </Border>
+
+            <Border x:Name="DownloadPanel" Grid.Row="1" Visibility="Collapsed" Background="#E3F1EE" BorderBrush="#B9D9D1" BorderThickness="0,0,0,1" Padding="24,9">
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock x:Name="DownloadStatusText" Text="正在下载" FontSize="11" Foreground="#245C53" />
+                        <ProgressBar x:Name="DownloadProgressBar" Height="4" Margin="0,7,14,0" Minimum="0" Maximum="100" Foreground="{StaticResource AccentBrush}" />
+                    </StackPanel>
+                    <Button Grid.Column="1" Style="{StaticResource ActionButtonStyle}" Width="34" Padding="0" Click="CancelDownloadButton_Click" ToolTip="取消当前下载">
+                        <TextBlock Text="×" FontSize="18" />
+                    </Button>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="2">
+                <ScrollViewer x:Name="CapturePage" VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="28,24" MaxWidth="820" HorizontalAlignment="Left">
+                        <Border Style="{StaticResource SectionStyle}">
+                            <StackPanel>
+                                <TextBlock Text="SteamVR 捕获" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock Text="从 SteamVR Compositor 读取选定单眼，避免桌面镜像带来的错位。" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,4,0,16" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                    <TextBlock Style="{StaticResource FieldLabelStyle}" Text="捕获来源" />
+                                    <TextBox x:Name="CaptureSourceTextBox" Grid.Column="1" IsReadOnly="True" ToolTip="直接读取 SteamVR Compositor 单眼纹理。" />
+                                    <TextBlock Grid.Row="1" Style="{StaticResource FieldLabelStyle}" Text="捕获眼睛" Margin="0,12,0,0" />
+                                    <ComboBox x:Name="StereoCompositionComboBox" Grid.Row="1" Grid.Column="1" Margin="0,12,0,0" ToolTip="框选时闭上另一只眼睛，让框和截图使用同一视点。">
+                                        <ComboBoxItem Content="左眼（闭右眼框选）" Tag="left-eye" />
+                                        <ComboBoxItem Content="右眼（闭左眼框选）" Tag="right-eye" />
+                                    </ComboBox>
+                                    <TextBlock Grid.Row="2" Style="{StaticResource FieldLabelStyle}" Text="桌面翻译热键" Margin="0,12,0,0" />
+                                    <ComboBox x:Name="HotKeyComboBox" Grid.Row="2" Grid.Column="1" Margin="0,12,0,0" ToolTip="VR 内左摇杆用于开始框选，接触截图时用于翻译或输入语音命令。">
+                                        <ComboBoxItem Content="F6" Tag="117" /><ComboBoxItem Content="F7" Tag="118" /><ComboBoxItem Content="F8" Tag="119" /><ComboBoxItem Content="F9" Tag="120" /><ComboBoxItem Content="F10" Tag="121" />
+                                    </ComboBox>
+                                    <TextBlock Grid.Row="3" Style="{StaticResource FieldLabelStyle}" Text="结果滚动" Margin="0,12,0,0" />
+                                    <CheckBox x:Name="InvertResultScrollCheckBox" Grid.Row="3" Grid.Column="1" Content="反转右摇杆上下方向" Margin="0,12,0,0" VerticalAlignment="Center" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="TestSelectionButton" Style="{StaticResource ActionButtonStyle}" Click="TestSelectionButton_Click" IsEnabled="False" ToolTip="模拟一次左摇杆短按；没有接触截图时会进入框选模式。">
+                                <StackPanel Orientation="Horizontal"><Path Data="{x:Static local:MaterialIconPaths.Send}" Width="15" Height="15" Stretch="Uniform" Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" /><TextBlock Text="模拟左摇杆" Margin="7,0,0,0" /></StackPanel>
+                            </Button>
+                            <Button x:Name="BindingsButton" Style="{StaticResource ActionButtonStyle}" Margin="8,0,0,0" Click="BindingsButton_Click" IsEnabled="False" ToolTip="打开本应用的 SteamVR 动作绑定页面。">
+                                <StackPanel Orientation="Horizontal"><Path Data="{x:Static local:MaterialIconPaths.GamepadVariant}" Width="16" Height="16" Stretch="Uniform" Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" /><TextBlock Text="SteamVR 按键绑定" Margin="7,0,0,0" /></StackPanel>
+                            </Button>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <Grid x:Name="ProvidersPage" Visibility="Collapsed" Margin="0">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="250" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                    <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0" Background="{StaticResource MutedSurfaceBrush}" Padding="18">
+                        <Grid>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="提供商" FontSize="14" FontWeight="SemiBold" />
+                                <TextBlock Text="选择模拟或兼容端点。" Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,3,0,12" />
+                                <Border Background="{StaticResource AccentSoftBrush}" CornerRadius="4" Padding="8,6" Margin="0,0,0,10">
+                                    <TextBlock x:Name="ActiveProviderSummaryText" Text="当前启用：未配置" Foreground="#245C53" FontSize="10" TextTrimming="CharacterEllipsis" ToolTip="当前用于视觉翻译请求的 Provider。" />
+                                </Border>
+                            </StackPanel>
+                            <ListBox x:Name="ProviderListBox" Grid.Row="1" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" Background="White" SelectionChanged="ProviderListBox_SelectionChanged" DisplayMemberPath="DisplayName" />
+                            <Grid Grid.Row="2" Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <Button x:Name="AddProviderButton" Style="{StaticResource ActionButtonStyle}" Click="AddProviderButton_Click">
+                                    <StackPanel Orientation="Horizontal"><Path Data="{x:Static local:MaterialIconPaths.Plus}" Width="15" Height="15" Stretch="Uniform" Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" /><TextBlock Text="添加" Margin="6,0,0,0" /></StackPanel>
+                                </Button>
+                                <Button x:Name="DeleteProviderButton" Grid.Column="1" Style="{StaticResource ActionButtonStyle}" Width="34" Padding="0" Margin="8,0,0,0" Click="DeleteProviderButton_Click" ToolTip="删除选中的提供商">
+                                    <Path Data="{x:Static local:MaterialIconPaths.DeleteOutline}" Width="15" Height="15" Stretch="Uniform" Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                                </Button>
+                            </Grid>
+                        </Grid>
+                    </Border>
+                    <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="28,24" MaxWidth="690" HorizontalAlignment="Left">
+                            <Border Style="{StaticResource SectionStyle}">
+                                <StackPanel>
+                                    <Grid Margin="0,0,0,14">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock x:Name="ProviderEditorTitleText" Text="模型提供商" FontSize="15" FontWeight="SemiBold" />
+                                            <TextBlock x:Name="ProviderEditorDescriptionText" Text="选择左侧提供商以查看配置。" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,4,0,0" />
+                                        </StackPanel>
+                                        <Button x:Name="ActivateProviderButton" Grid.Column="1" Style="{StaticResource ActionButtonStyle}" Click="ActivateProviderButton_Click" ToolTip="将选中的 Provider 用于下一次翻译。">
+                                            <TextBlock x:Name="ActivateProviderButtonText" Text="设为启用" />
+                                        </Button>
+                                    </Grid>
+                                    <Border x:Name="MockProviderPanel" Background="{StaticResource MutedSurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4" Padding="14" Visibility="Collapsed">
+                                        <StackPanel>
+                                            <TextBlock Text="内置模拟翻译" FontWeight="SemiBold" />
+                                            <TextBlock Text="执行真实截图和裁剪，但不会发送网络请求。触碰截图并按左摇杆后返回长文本流，用于测试抓取、空间结果和滚动链路。" Foreground="{StaticResource MutedTextBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,5,0,0" />
+                                        </StackPanel>
+                                    </Border>
+                                    <StackPanel x:Name="CompatibleProviderPanel">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="160" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                            <TextBlock Style="{StaticResource FieldLabelStyle}" Text="Base URL" />
+                                            <TextBox x:Name="BaseUrlTextBox" Grid.Column="1" ToolTip="例如 https://api.openai.com/v1。程序会调用 /models 和 /chat/completions。" TextChanged="ProviderField_TextChanged" />
+                                            <TextBlock Grid.Row="1" Style="{StaticResource FieldLabelStyle}" Text="API Key" Margin="0,12,0,0" />
+                                            <PasswordBox x:Name="ApiKeyPasswordBox" Grid.Row="1" Grid.Column="1" Margin="0,12,0,0" ToolTip="本地无鉴权兼容服务可以留空。" PasswordChanged="ProviderField_PasswordChanged" />
+                                            <TextBlock Grid.Row="2" Style="{StaticResource FieldLabelStyle}" Text="模型" Margin="0,12,0,0" />
+                                            <Grid Grid.Row="2" Grid.Column="1" Margin="0,12,0,0">
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <ComboBox x:Name="ProviderModelComboBox" SelectionChanged="ProviderModelComboBox_SelectionChanged" ToolTip="模型列表由 Provider 的 OpenAI 兼容 /models 接口返回。" />
+                                                <Button x:Name="RefreshProviderButton" Grid.Column="1" Style="{StaticResource ActionButtonStyle}" Margin="8,0,0,0" Click="RefreshProviderButton_Click" ToolTip="测试连通性并重新获取模型列表。">
+                                                    <StackPanel Orientation="Horizontal"><Path Data="{x:Static local:MaterialIconPaths.Refresh}" Width="15" Height="15" Stretch="Uniform" Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" /><TextBlock Text="测试并获取" Margin="6,0,0,0" /></StackPanel>
+                                                </Button>
+                                            </Grid>
+                                        </Grid>
+                                        <TextBlock x:Name="ProviderConnectionText" Text="尚未测试连接" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="160,10,0,0" />
+                                    </StackPanel>
+                                    <Grid Margin="0,14,0,0">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="160" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                        <TextBlock Style="{StaticResource FieldLabelStyle}" Text="目标语言" />
+                                        <ComboBox x:Name="TargetLanguageComboBox" Grid.Column="1">
+                                            <ComboBoxItem Content="简体中文" Tag="zh-CN" /><ComboBoxItem Content="日本語" Tag="ja-JP" /><ComboBoxItem Content="English" Tag="en-US" />
+                                        </ComboBox>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+
+                <ScrollViewer x:Name="VoicePage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="28,24" MaxWidth="820" HorizontalAlignment="Left">
+                        <Border Style="{StaticResource SectionStyle}">
+                            <StackPanel>
+                                <TextBlock Text="VRChat OSC 语音输入" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock Text="按住 SteamVR PTT 录音，松开后由 SenseVoice 识别并发送到 VRChat Chatbox。" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,4,0,14" />
+                                <CheckBox x:Name="VoiceInputEnabledCheckBox" Content="启用 VRChat 语音输入" FontWeight="SemiBold" ToolTip="开启后服务启动时会要求 SenseVoice 运行时和模型均已安装。" />
+                                <Grid Margin="0,14,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                    <TextBlock Style="{StaticResource FieldLabelStyle}" Text="麦克风" />
+                                    <ComboBox x:Name="MicrophoneComboBox" Grid.Column="1" ToolTip="可选择 VR 串流软件提供的远程麦克风。" />
+                                    <TextBlock Grid.Row="1" Style="{StaticResource FieldLabelStyle}" Text="OSC 地址" Margin="0,12,0,0" />
+                                    <Grid Grid.Row="1" Grid.Column="1" Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="90" /></Grid.ColumnDefinitions><TextBox x:Name="OscHostTextBox" ToolTip="VRChat 默认监听 127.0.0.1。" /><TextBox x:Name="OscPortTextBox" Grid.Column="1" Margin="8,0,0,0" ToolTip="VRChat Chatbox OSC 默认端口为 9000。" /></Grid>
+                                    <TextBlock Grid.Row="2" Style="{StaticResource FieldLabelStyle}" Text="发送方式" Margin="0,12,0,0" />
+                                    <CheckBox x:Name="OscSendImmediatelyCheckBox" Grid.Row="2" Grid.Column="1" Content="识别完成后立即提交 Chatbox" Margin="0,12,0,0" />
+                                    <TextBlock Grid.Row="3" Style="{StaticResource FieldLabelStyle}" Text="默认 VR 按键" Margin="0,12,0,0" />
+                                    <TextBlock Grid.Row="3" Grid.Column="1" Text="Touch：左手 X　Index：右手 A　其他：右手菜单键" Margin="0,12,0,0" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource SectionStyle}">
+                            <StackPanel>
+                                <TextBlock Text="SenseVoice 本地模型" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock Text="下载 CPU 常驻运行时、选定量化模型和 FSMN VAD；所有文件均校验 SHA-256。" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,4,0,14" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                    <TextBlock Style="{StaticResource FieldLabelStyle}" Text="量化版本" />
+                                    <ComboBox x:Name="AsrVariantComboBox" Grid.Column="1" SelectionChanged="AsrVariantComboBox_SelectionChanged" ToolTip="Q5 占用更小；Q8 精度略高。">
+                                        <ComboBoxItem Content="Q5_0 · 159.4 MiB" Tag="q5_0" /><ComboBoxItem Content="Q8_0 · 242.4 MiB" Tag="q8_0" />
+                                    </ComboBox>
+                                    <Button x:Name="DownloadAsrButton" Grid.Column="2" Style="{StaticResource PrimaryButtonStyle}" Margin="8,0,0,0" Click="DownloadAsrButton_Click">
+                                        <StackPanel Orientation="Horizontal"><Path Data="{x:Static local:MaterialIconPaths.Download}" Width="15" Height="15" Stretch="Uniform" Fill="White" /><TextBlock Text="下载并启用" Foreground="White" Margin="6,0,0,0" /></StackPanel>
+                                    </Button>
+                                    <TextBlock Grid.Row="1" Style="{StaticResource FieldLabelStyle}" Text="下载源" Margin="0,12,0,0" />
+                                    <CheckBox x:Name="HfMirrorCheckBox" Grid.Row="1" Grid.Column="1" Content="使用 HF Mirror（中国大陆网络）" Margin="0,12,0,0" ToolTip="只替换 Hugging Face 主机，文件仍按固定 SHA-256 校验。" />
+                                </Grid>
+                                <TextBlock x:Name="AsrInstallStatusText" Text="正在检测安装状态..." Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="170,10,0,0" TextWrapping="Wrap" />
+                                <Expander Header="高级路径" Margin="0,16,0,0" Foreground="{StaticResource TextBrush}">
+                                    <Grid Margin="0,12,0,0">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                        <TextBlock Style="{StaticResource FieldLabelStyle}" Text="SenseVoice 运行时" /><TextBox x:Name="SenseVoiceExecutableTextBox" Grid.Column="1" />
+                                        <TextBlock Grid.Row="1" Style="{StaticResource FieldLabelStyle}" Text="SenseVoice 模型" Margin="0,10,0,0" /><TextBox x:Name="SenseVoiceModelTextBox" Grid.Row="1" Grid.Column="1" Margin="0,10,0,0" />
+                                        <TextBlock Grid.Row="2" Style="{StaticResource FieldLabelStyle}" Text="VAD 模型" Margin="0,10,0,0" /><TextBox x:Name="SenseVoiceVadTextBox" Grid.Row="2" Grid.Column="1" Margin="0,10,0,0" />
+                                    </Grid>
+                                </Expander>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <Grid x:Name="DiagnosticsPage" Visibility="Collapsed" Margin="28,24">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <StackPanel><TextBlock Text="运行日志" FontSize="15" FontWeight="SemiBold" /><TextBlock Text="错误会同时写入程序目录下的日志文件。" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,3,0,0" /></StackPanel>
+                        <Button x:Name="OpenLogButton" Grid.Column="1" Style="{StaticResource ActionButtonStyle}" Click="OpenLogButton_Click">
+                            <StackPanel Orientation="Horizontal"><Path Data="{x:Static local:MaterialIconPaths.FolderOpenOutline}" Width="15" Height="15" Stretch="Uniform" Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" /><TextBlock Text="打开日志目录" Margin="7,0,0,0" /></StackPanel>
+                        </Button>
+                    </Grid>
+                    <TextBox x:Name="LogTextBox" Grid.Row="1" IsReadOnly="True" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Cascadia Mono, Consolas" FontSize="11" Background="#171D1A" Foreground="#DCE7E1" BorderThickness="0" Padding="12" />
+                </Grid>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>

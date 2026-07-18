@@ -1,0 +1,34 @@
+{
+  "controller_type": "oculus_touch",
+  "name": "SteamVR Translator Touch bindings",
+  "description": "Left joystick selects or translates a touched capture; grips move overlays; right stick scrolls or toggles all spatial overlays.",
+  "bindings": {
+    "/actions/global": {
+      "sources": [
+        { "path": "/user/hand/left/input/joystick", "mode": "button", "inputs": { "click": { "output": "/actions/global/in/toggle" } } }
+      ]
+    },
+    "/actions/selection": {
+      "sources": [
+        { "path": "/user/hand/left/input/trigger", "mode": "trigger", "inputs": { "click": { "output": "/actions/selection/in/left_trigger" } } },
+        { "path": "/user/hand/right/input/trigger", "mode": "trigger", "inputs": { "click": { "output": "/actions/selection/in/right_trigger" } } }
+      ],
+      "haptics": [
+        { "output": "/actions/selection/out/left_haptic", "path": "/user/hand/left/output/haptic" },
+        { "output": "/actions/selection/out/right_haptic", "path": "/user/hand/right/output/haptic" }
+      ]
+    },
+    "/actions/results": {
+      "sources": [
+        { "path": "/user/hand/right/input/joystick", "mode": "joystick", "inputs": { "position": { "output": "/actions/results/in/scroll" }, "click": { "output": "/actions/results/in/toggle_visibility" } } },
+        { "path": "/user/hand/left/input/grip", "mode": "trigger", "inputs": { "click": { "output": "/actions/results/in/left_grip" } } },
+        { "path": "/user/hand/right/input/grip", "mode": "trigger", "inputs": { "click": { "output": "/actions/results/in/right_grip" } } }
+      ]
+    },
+    "/actions/voiceinput": {
+      "sources": [
+        { "path": "/user/hand/left/input/x", "mode": "button", "inputs": { "click": { "output": "/actions/voiceinput/in/ptt" } } }
+      ]
+    }
+  }
+}
