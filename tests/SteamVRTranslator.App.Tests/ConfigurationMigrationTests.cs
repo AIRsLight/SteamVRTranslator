@@ -10,6 +10,14 @@ namespace SteamVRTranslator.App.Tests;
 public sealed class ConfigurationMigrationTests
 {
     [Fact]
+    public void NewConfigurationEnablesVrChatVoiceInputByDefault()
+    {
+        var configuration = new AppConfiguration();
+
+        Assert.True(configuration.VrChatVoiceInput.Enabled);
+    }
+
+    [Fact]
     public void NewTranslationConfigurationContainsOnlyTheMockProvider()
     {
         var translation = new TranslationConfiguration();
