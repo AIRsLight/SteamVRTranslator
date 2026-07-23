@@ -12,6 +12,7 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <ProjectReference Include="..\..\src\SteamVRTranslator.App\SteamVRTranslator.App.csproj" />
+    <ProjectReference Include="..\..\src\SteamVRTranslator.VibeVoice.Manager\SteamVRTranslator.VibeVoice.Manager.csproj" />
     <ProjectReference Include="..\..\src\SteamVRTranslator.VibeVoice.Server\SteamVRTranslator.VibeVoice.Server.csproj" />
   </ItemGroup>
 </Project>

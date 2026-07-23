@@ -9,7 +9,7 @@
 - 让多个客户端复用同一个常驻模型；
 - 独立安装和更新 CrispASR 运行时及 VibeVoice Q4_K 权重。
 
-发布包只包含 .NET 服务程序，不包含 CrispASR 二进制和模型权重。本机使用时，首次安装会写入服务程序所在目录：
+发布包包含跨平台后台服务和 Windows 原生管理器，不包含 CrispASR 二进制和模型权重。本机使用时，首次安装会写入服务程序所在目录：
 
 ```text
 vibevoice-service\data\
@@ -26,11 +26,17 @@ Windows 与 Linux 未指定 `dataDirectory` 时都使用服务程序旁的 `data
 
 1. 构建或解压发布包。
 2. 在主程序“字幕”页选择 `VibeVoice API`。
-3. 保持地址为 `http://127.0.0.1:5090`，点击“服务管理器”。
-4. 选择 CPU、Vulkan 或 CUDA，点击下载安装并启动。
+3. 保持地址为 `http://127.0.0.1:5090`，点击“服务管理器”，主程序会打开原生管理窗口并按需启动后台服务。
+4. 选择 CPU、Vulkan 或 CUDA；运行时与约 4.5 GB 的 Q4_K 模型可以分别下载，也可以点击“全部安装”。
 5. 返回主程序测试连接，再执行音频文件回放。
 
-若本机服务尚未运行，“服务管理器”按钮会启动发布目录中的：
+原生管理器位于：
+
+```text
+vibevoice-service\SteamVRTranslator.VibeVoice.Manager.exe
+```
+
+若本机服务尚未运行，管理器会在后台启动同目录中的：
 
 ```text
 vibevoice-service\SteamVRTranslator.VibeVoice.Server.exe
@@ -67,6 +73,9 @@ VIBEVOICE_DATA_DIRECTORY=/srv/vibevoice \
 | `GET` | `/health` | 无敏感信息的存活检查 |
 | `GET` | `/api/v1/status` | 安装、下载、运行时和错误状态 |
 | `POST` | `/api/v1/install` | 下载所选 CrispASR 运行时和 Q4_K 模型 |
+| `POST` | `/api/v1/install/runtime` | 只下载当前选择的 CrispASR 运行时 |
+| `POST` | `/api/v1/install/model` | 只下载共享的 VibeVoice Q4_K 模型 |
+| `POST` | `/api/v1/install/cancel` | 取消当前下载并保留可续传的 `.part` 文件 |
 | `POST` | `/api/v1/configure` | 保存 backend、device、threads 和镜像源 |
 | `POST` | `/api/v1/runtime/start` | 启动常驻推理进程 |
 | `POST` | `/api/v1/runtime/stop` | 停止常驻推理进程 |

@@ -19,6 +19,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SteamVRTranslator.App.Tests
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SteamVRTranslator.VibeVoice.Server", "src\SteamVRTranslator.VibeVoice.Server\SteamVRTranslator.VibeVoice.Server.csproj", "{99C7CB63-0C03-4F34-A93A-73B2E29FA16F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SteamVRTranslator.VibeVoice.Manager", "src\SteamVRTranslator.VibeVoice.Manager\SteamVRTranslator.VibeVoice.Manager.csproj", "{0BCA09B8-5904-4F7A-A5D3-9A5C386A24B7}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -52,6 +54,10 @@ Global
 		{99C7CB63-0C03-4F34-A93A-73B2E29FA16F}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{99C7CB63-0C03-4F34-A93A-73B2E29FA16F}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{99C7CB63-0C03-4F34-A93A-73B2E29FA16F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0BCA09B8-5904-4F7A-A5D3-9A5C386A24B7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0BCA09B8-5904-4F7A-A5D3-9A5C386A24B7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0BCA09B8-5904-4F7A-A5D3-9A5C386A24B7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0BCA09B8-5904-4F7A-A5D3-9A5C386A24B7}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{5271A950-5195-488A-8CEB-2BCB429A99C7} = {131CC67A-A158-4C64-B03B-2A95D6C114D8}
@@ -60,5 +66,6 @@ Global
 		{8A89B0CF-CDB2-4D62-8710-EAAEB2D2F005} = {6C3BDCB4-5C35-4C9D-8986-38806115A2F2}
 		{252FF912-857C-427D-97E7-64471A01F1EF} = {6C3BDCB4-5C35-4C9D-8986-38806115A2F2}
 		{99C7CB63-0C03-4F34-A93A-73B2E29FA16F} = {131CC67A-A158-4C64-B03B-2A95D6C114D8}
+		{0BCA09B8-5904-4F7A-A5D3-9A5C386A24B7} = {131CC67A-A158-4C64-B03B-2A95D6C114D8}
 	EndGlobalSection
 EndGlobal

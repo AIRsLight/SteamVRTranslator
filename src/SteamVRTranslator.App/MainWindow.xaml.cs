@@ -3042,6 +3042,13 @@ public partial class MainWindow : Window
         {
             ApplySubtitleControlsToConfiguration();
             var serviceUri = new Uri(_configuration.Subtitles.VibeVoiceServiceUrl);
+            if (StartBundledVibeVoiceManager(
+                    serviceUri.ToString(),
+                    VibeVoiceApiKeyPasswordBox.Password.Trim()))
+            {
+                return;
+            }
+
             if (serviceUri.IsLoopback)
             {
                 if (!await IsVibeVoiceServiceReachableAsync(CancellationToken.None))
@@ -3073,6 +3080,33 @@ public partial class MainWindow : Window
         {
             OpenVibeVoiceManagerButton.IsEnabled = true;
         }
+    }
+
+    private static bool StartBundledVibeVoiceManager(string serviceUrl, string apiKey)
+    {
+        var serviceDirectory = Path.Combine(AppContext.BaseDirectory, "vibevoice-service");
+        var executable = Path.Combine(
+            serviceDirectory,
+            "SteamVRTranslator.VibeVoice.Manager.exe");
+        if (!File.Exists(executable))
+        {
+            return false;
+        }
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = executable,
+            WorkingDirectory = serviceDirectory,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add("--service-url");
+        startInfo.ArgumentList.Add(serviceUrl);
+        if (!string.IsNullOrWhiteSpace(apiKey))
+        {
+            startInfo.Environment["VIBEVOICE_MANAGER_API_KEY"] = apiKey;
+        }
+        Process.Start(startInfo);
+        return true;
     }
 
     private async Task<string> ProbeVibeVoiceServiceAsync(CancellationToken cancellationToken)

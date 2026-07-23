@@ -45,6 +45,16 @@ if ($LASTEXITCODE -ne 0) {
     throw "VibeVoice service publish failed."
 }
 
+dotnet publish (Join-Path $root "src\SteamVRTranslator.VibeVoice.Manager\SteamVRTranslator.VibeVoice.Manager.csproj") `
+    -c Release `
+    -r win-x64 `
+    --self-contained $selfContainedValue `
+    -p:PublishSingleFile=false `
+    -o $vibeVoiceServiceOutput
+if ($LASTEXITCODE -ne 0) {
+    throw "VibeVoice service manager publish failed."
+}
+
 Copy-Item -LiteralPath (Join-Path $root "README.md") -Destination $output
 Copy-Item -LiteralPath (Join-Path $root "third_party\openvr\LICENSE") `
     -Destination (Join-Path $output "OPENVR-LICENSE.txt")

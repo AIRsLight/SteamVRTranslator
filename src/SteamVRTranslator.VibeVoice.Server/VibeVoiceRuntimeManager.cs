@@ -29,6 +29,7 @@ public sealed class VibeVoiceRuntimeManager : IAsyncDisposable
     private HttpClient? _runtimeClient;
     private Uri? _runtimeBaseUri;
     private Task? _installTask;
+    private CancellationTokenSource? _installCancellation;
     private VibeVoiceRuntimeSettings _settings;
     private string? _operation;
     private long _downloadedBytes;
@@ -115,7 +116,25 @@ public sealed class VibeVoiceRuntimeManager : IAsyncDisposable
 
             ApplySettings(request?.Backend, request?.DeviceIndex, request?.ThreadCount, request?.DownloadSource);
             _lastError = null;
-            _installTask = Task.Run(() => InstallAsync(CancellationToken.None));
+            _installCancellation?.Dispose();
+            _installCancellation = new CancellationTokenSource();
+            var target = InstallationTargets.Normalize(request?.Target);
+            var cancellationToken = _installCancellation.Token;
+            _installTask = Task.Run(() => InstallAsync(target, cancellationToken));
+            return true;
+        }
+    }
+
+    public bool CancelInstall()
+    {
+        lock (_statusLock)
+        {
+            if (_installTask is not { IsCompleted: false } || _installCancellation is null)
+            {
+                return false;
+            }
+
+            _installCancellation.Cancel();
             return true;
         }
     }
@@ -203,6 +222,7 @@ public sealed class VibeVoiceRuntimeManager : IAsyncDisposable
         }
 
         _disposed = true;
+        CancelInstall();
         await _lifecycleLock.WaitAsync();
         try
         {
@@ -216,7 +236,7 @@ public sealed class VibeVoiceRuntimeManager : IAsyncDisposable
         }
     }
 
-    private async Task InstallAsync(CancellationToken cancellationToken)
+    private async Task InstallAsync(string target, CancellationToken cancellationToken)
     {
         try
         {
@@ -225,9 +245,17 @@ public sealed class VibeVoiceRuntimeManager : IAsyncDisposable
             {
                 StopRuntimeCore();
                 SaveSettings();
-                await InstallRuntimeAsync(cancellationToken);
-                await InstallModelAsync(cancellationToken);
-                if (_options.AutoStartRuntime)
+                if (target is InstallationTargets.All or InstallationTargets.Runtime)
+                {
+                    await InstallRuntimeAsync(cancellationToken);
+                }
+                if (target is InstallationTargets.All or InstallationTargets.Model)
+                {
+                    await InstallModelAsync(cancellationToken);
+                }
+                if (_options.AutoStartRuntime &&
+                    IsRuntimeInstalled(ResolveRuntimeExecutable(_settings.Backend)) &&
+                    IsModelInstalled())
                 {
                     await StartRuntimeCoreAsync(cancellationToken);
                 }
@@ -236,6 +264,14 @@ public sealed class VibeVoiceRuntimeManager : IAsyncDisposable
             {
                 _lifecycleLock.Release();
             }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            lock (_statusLock)
+            {
+                _lastError = null;
+            }
+            _log.LogInformation("VibeVoice installation was cancelled.");
         }
         catch (Exception exception)
         {
@@ -252,6 +288,8 @@ public sealed class VibeVoiceRuntimeManager : IAsyncDisposable
                 _operation = null;
                 _downloadedBytes = 0;
                 _totalBytes = null;
+                _installCancellation?.Dispose();
+                _installCancellation = null;
             }
         }
     }

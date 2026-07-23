@@ -27,7 +27,7 @@
 - 截图和结果对象不限制数量。已有结果仍在生成时也可开始下一次框选、截图和请求；每个 Provider 按自己的最大并发数独立排队，不同 Provider 互不占用并发槽。进入框选后会暂时隐藏全部已有对象，截图完成后恢复，避免叠加层进入下一次捕获。
 - 服务运行中可热更新捕获眼睛、结果滚动方向、目标语言、当前启用 Provider 和下载镜像源；语音启用、麦克风、OSC 目标及 ASR 运行时相关设置仍需停止服务后修改。
 - 管理器和 SteamVR 覆盖层支持中文、English 与日本語。首次启动按 Windows 显示语言选择，不支持的语言回退为英语；后续手动选择会写入配置。识别语言可设为自动、明确语种或跟随界面语言，跟随模式在下一次启动服务时应用到 SenseVoice 常驻 worker。
-- 实验性字幕可在本机 SenseVoice 与独立 VibeVoice API 后端之间切换。必须先在桌面管理器手动启用，程序会校验所选 ASR 和可选说话人模型；未启用时 VR 控制面板不显示字幕入口。发布包附带 `vibevoice-service` 服务程序，负责下载和常驻运行 CrispASR 与 VibeVoice Q4_K；主程序只通过 HTTP 调用，因此服务也可部署到另一台 Windows 或 Linux x64 机器。
+- 实验性字幕可在本机 SenseVoice 与独立 VibeVoice API 后端之间切换。必须先在桌面管理器手动启用，程序会校验所选 ASR 和可选说话人模型；未启用时 VR 控制面板不显示字幕入口。发布包附带 `vibevoice-service` 后台服务和 Windows 原生管理器，可分别下载 CrispASR 运行时与 VibeVoice Q4_K；主程序只通过 HTTP 调用，因此服务也可部署到另一台 Windows 或 Linux x64 机器。
 - 实验性 Android 手机镜像通过 ADB 与官方 scrcpy server 传输 H.264，使用本地 FFmpeg 解码并映射 VR 光标为触摸输入。必须先在桌面管理器手动启用，程序会校验 scrcpy、ADB 和所选解码器；未启用时 VR 控制面板不显示手机入口。桌面管理器和 VR 控制面板都可选择 USB/无线 ADB 设备及 `720p / 900p / 1080p`、`30 / 60 / 90 / 120 FPS`、码率；运行时按需下载，不进入发布包。
 - 普通翻译和自定义命令使用 WPF Markdown 结果窗口；排版翻译请求完整 HTML，并由离屏 WebView2 按截图分辨率渲染为静态 PNG。结果只保留 PNG 和可见文本，完成后立即销毁 DOM。解析或渲染失败时只将该结果回退为纯文本窗口。
 - OpenAI 兼容接口默认请求 SSE 流式响应；Markdown 与自定义命令逐段刷新，HTML 排版翻译持续接收但只在完整文档返回后渲染。请求只在连续 90 秒没有任何新数据时超时，接口明确拒绝流式参数时自动回退到完整响应。
@@ -101,7 +101,7 @@ models/fsmn-vad.gguf
 
 SteamVR Compositor 仍要求当前 Windows 会话具有活动 DXGI 显示输出；断开的 RDP 会话会在测试前被明确拒绝，避免生成无效性能数据。
 
-字幕页选择 `VibeVoice API` 后，可连接发布目录中的独立服务或另一台机器上的服务。服务自带浏览器管理页，可下载 CPU、Vulkan 或 CUDA 版 CrispASR 运行时和 VibeVoice Q4_K 权重，并在转写请求到来时保持模型常驻。远程监听必须配置 API Key；完整部署方式和接口协议见 [VibeVoice 独立服务](docs/VIBEVOICE_SERVICE.md)。
+字幕页选择 `VibeVoice API` 后，可连接发布目录中的独立服务或另一台机器上的服务。本机优先打开原生管理器，远程和兼容场景仍可使用浏览器管理页；两者都能下载 CPU、Vulkan 或 CUDA 版 CrispASR 运行时和 VibeVoice Q4_K 权重，并在转写请求到来时保持模型常驻。远程监听必须配置 API Key；完整部署方式和接口协议见 [VibeVoice 独立服务](docs/VIBEVOICE_SERVICE.md)。
 
 程序会在运行期间持续持有所选眼睛的 SteamVR 镜像纹理。首次创建纹理时等待至少两个合成帧，并在检测到纯黑初始化帧时自动重试。裁切使用同一 `Compositor_FrameTiming` 中的 HMD 姿态，避免用新的头部姿态投影较旧的镜像画面。
 

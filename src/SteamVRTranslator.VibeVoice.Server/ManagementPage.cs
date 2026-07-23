@@ -47,10 +47,13 @@ internal static class ManagementPage
       <label for="key">API key</label><input id="key" type="password" autocomplete="off" placeholder="Required only when configured">
     </div>
     <div class="actions">
-      <button class="primary" onclick="install()">Download and start</button>
+      <button class="primary" onclick="install('all')">Install all</button>
+      <button onclick="install('runtime')">Download runtime</button>
+      <button onclick="install('model')">Download model</button>
       <button onclick="configure()">Apply</button>
       <button onclick="runtime('start')">Start</button>
       <button onclick="runtime('stop')">Stop</button>
+      <button id="cancel" onclick="cancelInstall()" hidden>Cancel download</button>
     </div>
     <progress id="progress" max="1" value="0" hidden></progress>
     <div id="error"></div>
@@ -67,6 +70,7 @@ const runtimeState = document.getElementById('runtime');
 const model = document.getElementById('model');
 const data = document.getElementById('data');
 const progress = document.getElementById('progress');
+const cancel = document.getElementById('cancel');
 const error = document.getElementById('error');
 key.value = sessionStorage.getItem('vibevoice-api-key') || '';
 key.addEventListener('change', () => sessionStorage.setItem('vibevoice-api-key', key.value));
@@ -91,12 +95,19 @@ async function refresh() {
     error.textContent = s.error || '';
     if (s.currentOperation) {
       progress.hidden = false;
+      cancel.hidden = false;
       progress.removeAttribute('value');
       if (s.totalBytes) { progress.value = s.downloadedBytes / s.totalBytes; }
-    } else { progress.hidden = true; progress.value = 0; }
+    } else { progress.hidden = true; cancel.hidden = true; progress.value = 0; }
   } catch (e) { error.textContent = e.message; }
 }
-async function install() { try { await call('/api/v1/install',{method:'POST',headers:headers(true),body:JSON.stringify(body())}); } catch(e){error.textContent=e.message;} refresh(); }
+async function install(target) {
+  const path = target === 'all' ? '/api/v1/install' : '/api/v1/install/' + target;
+  try { await call(path,{method:'POST',headers:headers(true),body:JSON.stringify(body())}); }
+  catch(e){error.textContent=e.message;}
+  refresh();
+}
+async function cancelInstall() { try { await call('/api/v1/install/cancel',{method:'POST',headers:headers()}); } catch(e){error.textContent=e.message;} refresh(); }
 async function configure() { try { await call('/api/v1/configure',{method:'POST',headers:headers(true),body:JSON.stringify(body())}); } catch(e){error.textContent=e.message;} refresh(); }
 async function runtime(action) { try { await call('/api/v1/runtime/'+action,{method:'POST',headers:headers()}); } catch(e){error.textContent=e.message;} refresh(); }
 refresh(); setInterval(refresh, 1000);

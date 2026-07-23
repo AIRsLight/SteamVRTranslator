@@ -90,6 +90,36 @@ app.MapPost("/api/v1/install", (HttpRequest httpRequest, InstallRequest request)
         ? Results.Accepted("/api/v1/status", runtime.GetStatus())
         : Results.Conflict(new { error = "An installation is already running." });
 });
+app.MapPost("/api/v1/install/runtime", (HttpRequest httpRequest, InstallRequest request) =>
+{
+    if (!runtime.IsAuthorized(httpRequest))
+    {
+        return Results.Unauthorized();
+    }
+    return runtime.StartInstall(request with { Target = InstallationTargets.Runtime })
+        ? Results.Accepted("/api/v1/status", runtime.GetStatus())
+        : Results.Conflict(new { error = "An installation is already running." });
+});
+app.MapPost("/api/v1/install/model", (HttpRequest httpRequest, InstallRequest request) =>
+{
+    if (!runtime.IsAuthorized(httpRequest))
+    {
+        return Results.Unauthorized();
+    }
+    return runtime.StartInstall(request with { Target = InstallationTargets.Model })
+        ? Results.Accepted("/api/v1/status", runtime.GetStatus())
+        : Results.Conflict(new { error = "An installation is already running." });
+});
+app.MapPost("/api/v1/install/cancel", (HttpRequest request) =>
+{
+    if (!runtime.IsAuthorized(request))
+    {
+        return Results.Unauthorized();
+    }
+    return runtime.CancelInstall()
+        ? Results.Accepted("/api/v1/status", runtime.GetStatus())
+        : Results.Conflict(new { error = "No installation is running." });
+});
 app.MapPost("/api/v1/configure", async (
     HttpRequest httpRequest,
     ConfigureRequest request,
