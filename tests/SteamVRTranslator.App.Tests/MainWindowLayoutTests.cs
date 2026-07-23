@@ -74,7 +74,7 @@ public sealed class MainWindowLayoutTests
     }
 
     [Fact]
-    public void DiagnosticsLogContentStartsAtTheTop()
+    public void DiagnosticsLogFillsRemainingSpaceWithReadableTopAlignedContent()
     {
         Exception? failure = null;
         var thread = new Thread(() =>
@@ -84,8 +84,19 @@ public sealed class MainWindowLayoutTests
             {
                 window = new MainWindow();
                 var log = Assert.IsType<TextBox>(window.FindName("LogTextBox"));
+                var panel = Assert.IsType<Border>(window.FindName("DiagnosticsLogPanel"));
 
+                Assert.Equal(1, Grid.GetRow(panel));
+                Assert.Equal(HorizontalAlignment.Stretch, panel.HorizontalAlignment);
+                Assert.Equal(VerticalAlignment.Stretch, panel.VerticalAlignment);
+                Assert.Equal(HorizontalAlignment.Stretch, log.HorizontalAlignment);
+                Assert.Equal(VerticalAlignment.Stretch, log.VerticalAlignment);
                 Assert.Equal(VerticalAlignment.Top, log.VerticalContentAlignment);
+                Assert.True(log.IsReadOnly);
+                Assert.True(log.IsEnabled);
+                Assert.True(log.FontSize >= 12);
+                Assert.Equal(Color.FromRgb(0xF2, 0xF5, 0xFA), ((SolidColorBrush)log.Foreground).Color);
+                Assert.Equal(Color.FromRgb(0x18, 0x22, 0x31), ((SolidColorBrush)panel.Background).Color);
             }
             catch (Exception exception)
             {

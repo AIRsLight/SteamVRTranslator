@@ -1104,7 +1104,38 @@
                             <StackPanel Orientation="Horizontal"><Path Data="{x:Static local:MaterialIconPaths.FolderOpenOutline}" Width="15" Height="15" Stretch="Uniform" Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" /><TextBlock Text="{loc:Loc Key=Diagnostics.OpenFolder}" Margin="7,0,0,0" /></StackPanel>
                         </Button>
                     </Grid>
-                    <TextBox x:Name="LogTextBox" Grid.Row="1" IsReadOnly="True" AcceptsReturn="True" VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Cascadia Mono, Consolas" FontSize="11" Background="#1F2329" Foreground="#E1E5EC" BorderThickness="0" Padding="12" />
+                    <Border x:Name="DiagnosticsLogPanel"
+                            Grid.Row="1"
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Stretch"
+                            Background="#182231"
+                            BorderBrush="#324156"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            SnapsToDevicePixels="True">
+                        <TextBox x:Name="LogTextBox"
+                                 Style="{x:Null}"
+                                 HorizontalAlignment="Stretch"
+                                 VerticalAlignment="Stretch"
+                                 HorizontalContentAlignment="Left"
+                                 VerticalContentAlignment="Top"
+                                 IsReadOnly="True"
+                                 IsReadOnlyCaretVisible="False"
+                                 AcceptsReturn="True"
+                                 VerticalScrollBarVisibility="Auto"
+                                 HorizontalScrollBarVisibility="Auto"
+                                 FontFamily="Cascadia Mono, Consolas"
+                                 FontSize="12.5"
+                                 Background="Transparent"
+                                 Foreground="#F2F5FA"
+                                 BorderThickness="0"
+                                 Padding="14,12"
+                                 SelectionBrush="#4E8EDE"
+                                 SelectionOpacity="0.72"
+                                 TextOptions.TextFormattingMode="Display"
+                                 TextOptions.TextRenderingMode="ClearType"
+                                 SpellCheck.IsEnabled="False" />
+                    </Border>
                 </Grid>
             </Grid>
         </Grid>
