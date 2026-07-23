@@ -776,7 +776,7 @@ public sealed class VrChatVoiceInputConfiguration
     public const int MinimumStreamingChunkIntervalMilliseconds = 0;
     public const int MaximumStreamingChunkIntervalMilliseconds = 10000;
 
-    public bool Enabled { get; set; }
+    public bool Enabled { get; set; } = true;
 
     public bool DesktopHotKeyEnabled { get; set; } = true;
 
