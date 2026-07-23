@@ -23,6 +23,8 @@ namespace SteamVRTranslator.App;
 
 public partial class MainWindow : Window
 {
+    internal const string ProjectRepositoryUrl = "https://github.com/AIRsLight/SteamVRTranslator";
+
     private readonly ConfigurationStore _configurationStore = new();
     private readonly AppLog _log;
     private readonly HttpClient _providerHttpClient = new() { Timeout = TimeSpan.FromSeconds(20) };
@@ -603,6 +605,15 @@ public partial class MainWindow : Window
         Process.Start(new ProcessStartInfo
         {
             FileName = _log.DirectoryPath,
+            UseShellExecute = true
+        });
+    }
+
+    private void OpenRepositoryButton_Click(object sender, RoutedEventArgs e)
+    {
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = ProjectRepositoryUrl,
             UseShellExecute = true
         });
     }

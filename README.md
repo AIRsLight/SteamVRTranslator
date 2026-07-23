@@ -1,5 +1,7 @@
 # SteamVR Translator
 
+[项目仓库](https://github.com/AIRsLight/SteamVRTranslator) · [版本发布](https://github.com/AIRsLight/SteamVRTranslator/releases)
+
 独立运行的 SteamVR 图像框选与翻译原型，不引用 `VRChatVoiceInput` 的程序集、配置或模型运行时。
 
 ## 当前功能

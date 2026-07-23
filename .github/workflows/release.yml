@@ -1,0 +1,74 @@
+name: Build and release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Validate release version
+        id: version
+        shell: pwsh
+        run: |
+          [xml]$props = Get-Content -LiteralPath "Directory.Build.props"
+          $version = [string]$props.Project.PropertyGroup.Version
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw "Directory.Build.props does not define Version."
+          }
+
+          if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Tag '$env:GITHUB_REF_NAME' does not match project version '$version'."
+          }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Test and package
+        shell: pwsh
+        run: ./build.ps1
+
+      - name: Write checksums
+        shell: pwsh
+        run: |
+          $archive = "artifacts/SteamVRTranslator-win-x64.zip"
+          $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  SteamVRTranslator-win-x64.zip" |
+            Set-Content -LiteralPath "artifacts/SHA256SUMS.txt" -Encoding ascii
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SteamVRTranslator-${{ steps.version.outputs.version }}-win-x64
+          path: |
+            artifacts/SteamVRTranslator-win-x64.zip
+            artifacts/SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Create GitHub release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$env:GITHUB_REF_NAME" `
+            "artifacts/SteamVRTranslator-win-x64.zip" `
+            "artifacts/SHA256SUMS.txt" `
+            --verify-tag `
+            --title "SteamVR Translator ${{ steps.version.outputs.version }}" `
+            --generate-notes
