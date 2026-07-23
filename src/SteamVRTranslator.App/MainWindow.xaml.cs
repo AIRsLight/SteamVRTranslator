@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Windows.Controls;
@@ -945,6 +946,21 @@ public partial class MainWindow : Window
             return;
         }
 
+        QueuePromptSettingsSave();
+    }
+
+    private void PromptGenerationSetting_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded || _updatingPromptControls)
+        {
+            return;
+        }
+
+        QueuePromptSettingsSave();
+    }
+
+    private void QueuePromptSettingsSave()
+    {
         _promptSettingsDirty = true;
         PromptSaveStatusText.Text = T("Prompt.Waiting");
         PromptSaveStatusText.Foreground = new SolidColorBrush(Color.FromRgb(102, 112, 106));
@@ -959,11 +975,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _promptSettingsDirty = true;
-        PromptSaveStatusText.Text = T("Prompt.Waiting");
-        PromptSaveStatusText.Foreground = new SolidColorBrush(Color.FromRgb(102, 112, 106));
-        _promptSaveTimer.Stop();
-        _promptSaveTimer.Start();
+        QueuePromptSettingsSave();
     }
 
     private void PromptSaveTimer_Tick(object? sender, EventArgs e)
@@ -1887,10 +1899,11 @@ public partial class MainWindow : Window
             LayoutTranslationPromptTextBox.Text = prompts.LayoutTranslationPrompt;
             CustomCommandSystemPromptTextBox.Text = prompts.CustomCommandSystemPrompt;
             CustomCommandPromptTextBox.Text = prompts.CustomCommandPrompt;
-        VoiceTranslationSystemPromptTextBox.Text = prompts.VoiceTranslationSystemPrompt;
-        VoiceTranslationPromptTextBox.Text = prompts.VoiceTranslationPrompt;
-        SubtitleTranslationSystemPromptTextBox.Text = prompts.SubtitleTranslationSystemPrompt;
-        SubtitleTranslationPromptTextBox.Text = prompts.SubtitleTranslationPrompt;
+            VoiceTranslationSystemPromptTextBox.Text = prompts.VoiceTranslationSystemPrompt;
+            VoiceTranslationPromptTextBox.Text = prompts.VoiceTranslationPrompt;
+            SubtitleTranslationSystemPromptTextBox.Text = prompts.SubtitleTranslationSystemPrompt;
+            SubtitleTranslationPromptTextBox.Text = prompts.SubtitleTranslationPrompt;
+            PopulatePromptGenerationControls();
             PopulatePromptProviderControls();
         }
         finally
@@ -1922,6 +1935,55 @@ public partial class MainWindow : Window
         {
             _updatingPromptControls = wasUpdating;
         }
+    }
+
+    private void PopulatePromptGenerationControls()
+    {
+        var generation = _configuration.Translation.PromptGeneration;
+        PopulatePromptGenerationControls(
+            generation.GetFor(PromptProviderPurpose.DirectTranslation),
+            DirectThinkingCheckBox,
+            DirectTemperatureTextBox,
+            DirectTopPTextBox,
+            DirectMaxTokensTextBox);
+        PopulatePromptGenerationControls(
+            generation.GetFor(PromptProviderPurpose.LayoutTranslation),
+            LayoutThinkingCheckBox,
+            LayoutTemperatureTextBox,
+            LayoutTopPTextBox,
+            LayoutMaxTokensTextBox);
+        PopulatePromptGenerationControls(
+            generation.GetFor(PromptProviderPurpose.CustomCommand),
+            CustomThinkingCheckBox,
+            CustomTemperatureTextBox,
+            CustomTopPTextBox,
+            CustomMaxTokensTextBox);
+        PopulatePromptGenerationControls(
+            generation.GetFor(PromptProviderPurpose.VoiceTranslation),
+            VoiceThinkingCheckBox,
+            VoiceTemperatureTextBox,
+            VoiceTopPTextBox,
+            VoiceMaxTokensTextBox);
+        PopulatePromptGenerationControls(
+            generation.GetFor(PromptProviderPurpose.SubtitleTranslation),
+            SubtitleThinkingCheckBox,
+            SubtitleTemperatureTextBox,
+            SubtitleTopPTextBox,
+            SubtitleMaxTokensTextBox);
+    }
+
+    private static void PopulatePromptGenerationControls(
+        PromptGenerationConfiguration generation,
+        CheckBox thinking,
+        TextBox temperature,
+        TextBox topP,
+        TextBox maximumOutputTokens)
+    {
+        thinking.IsChecked = generation.EnableThinking;
+        temperature.Text = generation.Temperature.ToString("0.###", CultureInfo.InvariantCulture);
+        topP.Text = generation.TopP.ToString("0.###", CultureInfo.InvariantCulture);
+        maximumOutputTokens.Text = generation.MaximumOutputTokens.ToString(
+            CultureInfo.InvariantCulture);
     }
 
     private void PopulatePromptProviderComboBox(ComboBox comboBox, PromptProviderPurpose purpose)
@@ -2621,8 +2683,8 @@ public partial class MainWindow : Window
             Providers = providers.Select(CloneProvider).ToList(),
             TargetLanguage = targetLanguage,
             EnableStreaming = _configuration.Translation.EnableStreaming,
-            DisableThinking = _configuration.Translation.DisableThinking,
             PromptProviders = _configuration.Translation.PromptProviders.Clone(),
+            PromptGeneration = _configuration.Translation.PromptGeneration.Clone(),
             SystemPrompt = _configuration.Translation.SystemPrompt,
             MarkdownTranslationPrompt = _configuration.Translation.MarkdownTranslationPrompt,
             LayoutTranslationSystemPrompt = _configuration.Translation.LayoutTranslationSystemPrompt,
@@ -2650,6 +2712,83 @@ public partial class MainWindow : Window
         translation.PromptProviders.SetProviderId(
             PromptProviderPurpose.SubtitleTranslation,
             SelectedPromptProviderId(SubtitlePromptProviderComboBox));
+        translation.PromptGeneration = ReadPromptGenerationControls();
+    }
+
+    private PromptGenerationSettingsConfiguration ReadPromptGenerationControls() => new()
+    {
+        DirectTranslation = ReadPromptGenerationControls(
+            DirectThinkingCheckBox,
+            DirectTemperatureTextBox,
+            DirectTopPTextBox,
+            DirectMaxTokensTextBox),
+        LayoutTranslation = ReadPromptGenerationControls(
+            LayoutThinkingCheckBox,
+            LayoutTemperatureTextBox,
+            LayoutTopPTextBox,
+            LayoutMaxTokensTextBox),
+        CustomCommand = ReadPromptGenerationControls(
+            CustomThinkingCheckBox,
+            CustomTemperatureTextBox,
+            CustomTopPTextBox,
+            CustomMaxTokensTextBox),
+        VoiceTranslation = ReadPromptGenerationControls(
+            VoiceThinkingCheckBox,
+            VoiceTemperatureTextBox,
+            VoiceTopPTextBox,
+            VoiceMaxTokensTextBox),
+        SubtitleTranslation = ReadPromptGenerationControls(
+            SubtitleThinkingCheckBox,
+            SubtitleTemperatureTextBox,
+            SubtitleTopPTextBox,
+            SubtitleMaxTokensTextBox)
+    };
+
+    private PromptGenerationConfiguration ReadPromptGenerationControls(
+        CheckBox thinking,
+        TextBox temperature,
+        TextBox topP,
+        TextBox maximumOutputTokens)
+    {
+        if (!double.TryParse(
+                temperature.Text,
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out var temperatureValue) ||
+            !double.IsFinite(temperatureValue) ||
+            temperatureValue is < 0 or > 2)
+        {
+            throw new InvalidOperationException(T("Prompt.Validation.Temperature"));
+        }
+        if (!double.TryParse(
+                topP.Text,
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out var topPValue) ||
+            !double.IsFinite(topPValue) ||
+            topPValue is < 0 or > 1)
+        {
+            throw new InvalidOperationException(T("Prompt.Validation.TopP"));
+        }
+        if (!int.TryParse(
+                maximumOutputTokens.Text,
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var maximumOutputTokensValue) ||
+            maximumOutputTokensValue is
+                < PromptGenerationConfiguration.ProviderDefaultMaximumOutputTokens or
+                > PromptGenerationConfiguration.MaximumAllowedOutputTokens)
+        {
+            throw new InvalidOperationException(T("Prompt.Validation.MaxTokens"));
+        }
+
+        return new PromptGenerationConfiguration
+        {
+            EnableThinking = thinking.IsChecked == true,
+            Temperature = temperatureValue,
+            TopP = topPValue,
+            MaximumOutputTokens = maximumOutputTokensValue
+        };
     }
 
     private void CopyPromptEditorsTo(LocalizedPromptConfiguration prompts)
@@ -2742,8 +2881,8 @@ public partial class MainWindow : Window
                 Providers = configuration.Translation.Providers.Select(CloneProvider).ToList(),
                 TargetLanguage = configuration.Translation.TargetLanguage,
                 EnableStreaming = configuration.Translation.EnableStreaming,
-                DisableThinking = configuration.Translation.DisableThinking,
                 PromptProviders = configuration.Translation.PromptProviders.Clone(),
+                PromptGeneration = configuration.Translation.PromptGeneration.Clone(),
                 SystemPrompt = configuration.Translation.SystemPrompt,
                 MarkdownTranslationPrompt = configuration.Translation.MarkdownTranslationPrompt,
                 LayoutTranslationSystemPrompt = configuration.Translation.LayoutTranslationSystemPrompt,

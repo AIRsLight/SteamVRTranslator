@@ -12,6 +12,109 @@ namespace SteamVRTranslator.App.Tests;
 public sealed class OpenAiCompatibleVisionBackendTests
 {
     [Fact]
+    public async Task EveryPromptPurposeUsesItsOwnGenerationSettings()
+    {
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                "{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}",
+                System.Text.Encoding.UTF8,
+                "application/json")
+        });
+        using var client = new HttpClient(handler);
+        var configuration = new TranslationConfiguration
+        {
+            ActiveProviderId = "test",
+            Providers =
+            [
+                new TranslationProviderConfiguration
+                {
+                    Id = "test",
+                    BaseUrl = "https://example.invalid/v1",
+                    Model = "qwen3-vl-flash",
+                    ApiKey = "test-key"
+                }
+            ],
+            EnableStreaming = false,
+            PromptGeneration = new PromptGenerationSettingsConfiguration
+            {
+                DirectTranslation = Generation(0.1, 0.91, 101, false),
+                LayoutTranslation = Generation(0.2, 0.82, 202, true),
+                CustomCommand = Generation(0.3, 0.73, 303, false),
+                VoiceTranslation = Generation(0.4, 0.64, 404, true),
+                SubtitleTranslation = Generation(0.5, 0.55, 505, false)
+            }
+        };
+        var backend = new OpenAiCompatibleVisionBackend(configuration, client);
+
+        await backend.TranslateAsync([1], null, CancellationToken.None);
+        AssertGeneration(handler.LastRequestBody, 0.1, 0.91, 101, false);
+
+        await backend.TranslateLayoutAsync([1], CancellationToken.None);
+        AssertGeneration(handler.LastRequestBody, 0.2, 0.82, 202, true);
+
+        await backend.ExecuteCustomCommandAsync(
+            [1],
+            "explain",
+            [],
+            null,
+            CancellationToken.None);
+        AssertGeneration(handler.LastRequestBody, 0.3, 0.73, 303, false);
+
+        await backend.TranslateTextAsync(
+            "hello",
+            "zh-CN",
+            "system",
+            "task",
+            null,
+            CancellationToken.None);
+        AssertGeneration(handler.LastRequestBody, 0.4, 0.64, 404, true);
+
+        var subtitleBackend = new OpenAiCompatibleVisionBackend(
+            configuration,
+            client,
+            textTranslationPurpose: PromptProviderPurpose.SubtitleTranslation);
+        await subtitleBackend.TranslateTextAsync(
+            "hello",
+            "zh-CN",
+            "system",
+            "task",
+            null,
+            CancellationToken.None);
+        AssertGeneration(handler.LastRequestBody, 0.5, 0.55, 505, false);
+
+        static PromptGenerationConfiguration Generation(
+            double temperature,
+            double topP,
+            int maximumOutputTokens,
+            bool enableThinking) => new()
+        {
+            EnableThinking = enableThinking,
+            Temperature = temperature,
+            TopP = topP,
+            MaximumOutputTokens = maximumOutputTokens
+        };
+
+        static void AssertGeneration(
+            string requestBody,
+            double temperature,
+            double topP,
+            int maximumOutputTokens,
+            bool enableThinking)
+        {
+            using var payload = JsonDocument.Parse(requestBody);
+            Assert.Equal(temperature, payload.RootElement.GetProperty("temperature").GetDouble(), 3);
+            Assert.Equal(topP, payload.RootElement.GetProperty("top_p").GetDouble(), 3);
+            Assert.Equal(
+                maximumOutputTokens,
+                payload.RootElement.GetProperty("max_tokens").GetInt32());
+            Assert.Equal(
+                enableThinking,
+                payload.RootElement.GetProperty("enable_thinking").GetBoolean());
+        }
+    }
+
+    [Fact]
     public async Task EventStreamPublishesIncrementalText()
     {
         var handler = new StubHandler(_ =>

@@ -169,9 +169,12 @@ public sealed class TranslationConfiguration
 
     public bool EnableStreaming { get; set; } = true;
 
+    [JsonIgnore]
     public bool DisableThinking { get; set; } = true;
 
     public PromptProviderConfiguration PromptProviders { get; set; } = new();
+
+    public PromptGenerationSettingsConfiguration PromptGeneration { get; set; } = new();
 
     [JsonIgnore]
     public string SystemPrompt { get; set; } = BuiltInPromptDefaults.MarkdownSystemPrompt;
@@ -210,6 +213,119 @@ public enum PromptProviderPurpose
     CustomCommand,
     VoiceTranslation,
     SubtitleTranslation
+}
+
+public sealed class PromptGenerationSettingsConfiguration
+{
+    public PromptGenerationConfiguration DirectTranslation { get; set; } = new();
+
+    public PromptGenerationConfiguration LayoutTranslation { get; set; } = new();
+
+    public PromptGenerationConfiguration CustomCommand { get; set; } = new();
+
+    public PromptGenerationConfiguration VoiceTranslation { get; set; } = new();
+
+    public PromptGenerationConfiguration SubtitleTranslation { get; set; } = new();
+
+    public PromptGenerationConfiguration GetFor(PromptProviderPurpose purpose) => purpose switch
+    {
+        PromptProviderPurpose.LayoutTranslation => LayoutTranslation,
+        PromptProviderPurpose.CustomCommand => CustomCommand,
+        PromptProviderPurpose.VoiceTranslation => VoiceTranslation,
+        PromptProviderPurpose.SubtitleTranslation => SubtitleTranslation,
+        _ => DirectTranslation
+    };
+
+    public void Normalize()
+    {
+        DirectTranslation ??= new PromptGenerationConfiguration();
+        LayoutTranslation ??= new PromptGenerationConfiguration();
+        CustomCommand ??= new PromptGenerationConfiguration();
+        VoiceTranslation ??= new PromptGenerationConfiguration();
+        SubtitleTranslation ??= new PromptGenerationConfiguration();
+
+        DirectTranslation.Normalize();
+        LayoutTranslation.Normalize();
+        CustomCommand.Normalize();
+        VoiceTranslation.Normalize();
+        SubtitleTranslation.Normalize();
+    }
+
+    public PromptGenerationSettingsConfiguration Clone() => new()
+    {
+        DirectTranslation = DirectTranslation.Clone(),
+        LayoutTranslation = LayoutTranslation.Clone(),
+        CustomCommand = CustomCommand.Clone(),
+        VoiceTranslation = VoiceTranslation.Clone(),
+        SubtitleTranslation = SubtitleTranslation.Clone()
+    };
+
+    public static PromptGenerationSettingsConfiguration FromLegacyDisableThinking(
+        bool disableThinking)
+    {
+        var enableThinking = !disableThinking;
+        return new PromptGenerationSettingsConfiguration
+        {
+            DirectTranslation = new PromptGenerationConfiguration
+            {
+                EnableThinking = enableThinking
+            },
+            LayoutTranslation = new PromptGenerationConfiguration
+            {
+                EnableThinking = enableThinking
+            },
+            CustomCommand = new PromptGenerationConfiguration
+            {
+                EnableThinking = enableThinking
+            },
+            VoiceTranslation = new PromptGenerationConfiguration
+            {
+                EnableThinking = enableThinking
+            },
+            SubtitleTranslation = new PromptGenerationConfiguration
+            {
+                EnableThinking = enableThinking
+            }
+        };
+    }
+}
+
+public sealed class PromptGenerationConfiguration
+{
+    public const double DefaultTemperature = 0;
+    public const double DefaultTopP = 1;
+    public const int ProviderDefaultMaximumOutputTokens = 0;
+    public const int MaximumAllowedOutputTokens = 131072;
+
+    public bool EnableThinking { get; set; }
+
+    public double Temperature { get; set; } = DefaultTemperature;
+
+    public double TopP { get; set; } = DefaultTopP;
+
+    public int MaximumOutputTokens { get; set; } = ProviderDefaultMaximumOutputTokens;
+
+    public void Normalize()
+    {
+        Temperature = double.IsFinite(Temperature)
+            ? Math.Clamp(Temperature, 0, 2)
+            : DefaultTemperature;
+        TopP = double.IsFinite(TopP)
+            ? Math.Clamp(TopP, 0, 1)
+            : DefaultTopP;
+        MaximumOutputTokens = Math.Clamp(
+            MaximumOutputTokens,
+            ProviderDefaultMaximumOutputTokens,
+            MaximumAllowedOutputTokens);
+    }
+
+    public PromptGenerationConfiguration Clone() => new()
+    {
+        EnableThinking = EnableThinking,
+        Temperature = Temperature,
+        TopP = TopP,
+        MaximumOutputTokens = MaximumOutputTokens
+    };
 }
 
 public sealed class PromptProviderConfiguration

@@ -553,7 +553,8 @@ public sealed class SubtitleSessionController : IDisposable
                 : new OpenAiCompatibleVisionBackend(
                     _configuration.Translation,
                     _httpClient,
-                    providerId: provider.Id);
+                    providerId: provider.Id,
+                    textTranslationPurpose: PromptProviderPurpose.SubtitleTranslation);
             var translated = await backend.TranslateTextAsync(
                 sourceText,
                 _configuration.Subtitles.TargetLanguage,

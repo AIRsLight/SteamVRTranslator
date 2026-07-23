@@ -805,6 +805,15 @@
                                     <TextBlock Style="{StaticResource FieldLabelStyle}" Text="{loc:Loc Key=Prompt.Direct.Task}" Margin="0,16,0,0" />
                                     <TextBlock Text="{loc:Loc Key=Prompt.Direct.TaskDescription}" Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,4,0,7" />
                                     <TextBox x:Name="MarkdownTranslationPromptTextBox" Style="{StaticResource PromptEditorStyle}" TextChanged="PromptEditor_TextChanged" ToolTip="{loc:Loc Key=Prompt.Direct.TaskTooltip}" />
+                                    <Expander x:Name="DirectPromptAdvancedExpander" Header="{loc:Loc Key=Prompt.Advanced}" IsExpanded="False" Margin="0,16,0,0">
+                                        <StackPanel Margin="0,8,0,4">
+                                            <TextBlock Text="{loc:Loc Key=Prompt.Advanced.Description}" Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,0,0,10" TextWrapping="Wrap" />
+                                            <CheckBox x:Name="DirectThinkingCheckBox" Content="{loc:Loc Key=Prompt.Advanced.Thinking}" Checked="PromptGenerationSetting_Changed" Unchecked="PromptGenerationSetting_Changed" ToolTip="{loc:Loc Key=Prompt.Advanced.Thinking.Tooltip}" />
+                                            <Grid Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="160" /><ColumnDefinition Width="130" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Style="{StaticResource FieldLabelStyle}" Text="{loc:Loc Key=Prompt.Advanced.Temperature}" /><TextBox x:Name="DirectTemperatureTextBox" Grid.Column="1" TextChanged="PromptEditor_TextChanged" ToolTip="{loc:Loc Key=Prompt.Advanced.Temperature.Tooltip}" /></Grid>
+                                            <Grid Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="160" /><ColumnDefinition Width="130" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Style="{StaticResource FieldLabelStyle}" Text="{loc:Loc Key=Prompt.Advanced.TopP}" /><TextBox x:Name="DirectTopPTextBox" Grid.Column="1" TextChanged="PromptEditor_TextChanged" ToolTip="{loc:Loc Key=Prompt.Advanced.TopP.Tooltip}" /></Grid>
+                                            <Grid Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="160" /><ColumnDefinition Width="130" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Style="{StaticResource FieldLabelStyle}" Text="{loc:Loc Key=Prompt.Advanced.MaxTokens}" /><TextBox x:Name="DirectMaxTokensTextBox" Grid.Column="1" TextChanged="PromptEditor_TextChanged" ToolTip="{loc:Loc Key=Prompt.Advanced.MaxTokens.Tooltip}" /></Grid>
+                                        </StackPanel>
+                                    </Expander>
                                 </StackPanel>
                             </ScrollViewer>
                         </TabItem>
@@ -818,6 +827,15 @@
                                     <TextBlock Style="{StaticResource FieldLabelStyle}" Text="{loc:Loc Key=Prompt.Layout.Task}" Margin="0,16,0,0" />
                                     <TextBlock Text="{loc:Loc Key=Prompt.Layout.TaskDescription}" Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,4,0,7" />
                                     <TextBox x:Name="LayoutTranslationPromptTextBox" Style="{StaticResource PromptEditorStyle}" TextChanged="PromptEditor_TextChanged" ToolTip="{loc:Loc Key=Prompt.Layout.TaskTooltip}" />
+                                    <Expander x:Name="LayoutPromptAdvancedExpander" Header="{loc:Loc Key=Prompt.Advanced}" IsExpanded="False" Margin="0,16,0,0">
+                                        <StackPanel Margin="0,8,0,4">
+                                            <TextBlock Text="{loc:Loc Key=Prompt.Advanced.Description}" Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,0,0,10" TextWrapping="Wrap" />
+                                            <CheckBox x:Name="LayoutThinkingCheckBox" Content="{loc:Loc Key=Prompt.Advanced.Thinking}" Checked="PromptGenerationSetting_Changed" Unchecked="PromptGenerationSetting_Changed" ToolTip="{loc:Loc Key=Prompt.Advanced.Thinking.Tooltip}" />
+                                            <Grid Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="160" /><ColumnDefinition Width="130" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Style="{StaticResource FieldLabelStyle}" Text="{loc:Loc Key=Prompt.Advanced.Temperature}" /><TextBox x:Name="LayoutTemperatureTextBox" Grid.Column="1" TextChanged="PromptEditor_TextChanged" ToolTip="{loc:Loc Key=Prompt.Advanced.Temperature.Tooltip}" /></Grid>
+                                            <Grid Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="160" /><ColumnDefinition Width="130" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Style="{StaticResource FieldLabelStyle}" Text="{loc:Loc Key=Prompt.Advanced.TopP}" /><TextBox x:Name="LayoutTopPTextBox" Grid.Column="1" TextChanged="PromptEditor_TextChanged" ToolTip="{loc:Loc Key=Prompt.Advanced.TopP.Tooltip}" /></Grid>
+                                            <Grid Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="160" /><ColumnDefinition Width="130" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Style="{StaticResource FieldLabelStyle}" Text="{loc:Loc Key=Prompt.Advanced.MaxTokens}" /><TextBox x:Name="LayoutMaxTokensTextBox" Grid.Column="1" TextChanged="PromptEditor_TextChanged" ToolTip="{loc:Loc Key=Prompt.Advanced.MaxTokens.Tooltip}" /></Grid>
+                                        </StackPanel>
+                                    </Expander>
                                 </StackPanel>
                             </ScrollViewer>
                         </TabItem>
@@ -831,6 +849,15 @@
                                     <TextBlock Style="{StaticResource FieldLabelStyle}" Text="{loc:Loc Key=Prompt.Custom.Task}" Margin="0,16,0,0" />
                                     <TextBlock Text="{loc:Loc Key=Prompt.Custom.TaskDescription}" Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,4,0,7" />
                                     <TextBox x:Name="CustomCommandPromptTextBox" Style="{StaticResource PromptEditorStyle}" TextChanged="PromptEditor_TextChanged" ToolTip="{loc:Loc Key=Prompt.Custom.TaskTooltip}" />
+                                    <Expander x:Name="CustomPromptAdvancedExpander" Header="{loc:Loc Key=Prompt.Advanced}" IsExpanded="False" Margin="0,16,0,0">
+                                        <StackPanel Margin="0,8,0,4">
+                                            <TextBlock Text="{loc:Loc Key=Prompt.Advanced.Description}" Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,0,0,10" TextWrapping="Wrap" />
+                                            <CheckBox x:Name="CustomThinkingCheckBox" Content="{loc:Loc Key=Prompt.Advanced.Thinking}" Checked="PromptGenerationSetting_Changed" Unchecked="PromptGenerationSetting_Changed" ToolTip="{loc:Loc Key=Prompt.Advanced.Thinking.Tooltip}" />
+                                            <Grid Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="160" /><ColumnDefinition Width="130" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Style="{StaticResource FieldLabelStyle}" Text="{loc:Loc Key=Prompt.Advanced.Temperature}" /><TextBox x:Name="CustomTemperatureTextBox" Grid.Column="1" TextChanged="PromptEditor_TextChanged" ToolTip="{loc:Loc Key=Prompt.Advanced.Temperature.Tooltip}" /></Grid>
+                                            <Grid Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="160" /><ColumnDefinition Width="130" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Style="{StaticResource FieldLabelStyle}" Text="{loc:Loc Key=Prompt.Advanced.TopP}" /><TextBox x:Name="CustomTopPTextBox" Grid.Column="1" TextChanged="PromptEditor_TextChanged" ToolTip="{loc:Loc Key=Prompt.Advanced.TopP.Tooltip}" /></Grid>
+                                            <Grid Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="160" /><ColumnDefinition Width="130" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Style="{StaticResource FieldLabelStyle}" Text="{loc:Loc Key=Prompt.Advanced.MaxTokens}" /><TextBox x:Name="CustomMaxTokensTextBox" Grid.Column="1" TextChanged="PromptEditor_TextChanged" ToolTip="{loc:Loc Key=Prompt.Advanced.MaxTokens.Tooltip}" /></Grid>
+                                        </StackPanel>
+                                    </Expander>
                                 </StackPanel>
                             </ScrollViewer>
                         </TabItem>
@@ -844,6 +871,15 @@
                                     <TextBlock Style="{StaticResource FieldLabelStyle}" Text="{loc:Loc Key=Prompt.Voice.Task}" Margin="0,16,0,0" />
                                     <TextBlock Text="{loc:Loc Key=Prompt.Voice.TaskDescription}" Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,4,0,7" TextWrapping="Wrap" />
                                     <TextBox x:Name="VoiceTranslationPromptTextBox" Style="{StaticResource PromptEditorStyle}" TextChanged="PromptEditor_TextChanged" ToolTip="{loc:Loc Key=Prompt.Voice.TaskTooltip}" />
+                                    <Expander x:Name="VoicePromptAdvancedExpander" Header="{loc:Loc Key=Prompt.Advanced}" IsExpanded="False" Margin="0,16,0,0">
+                                        <StackPanel Margin="0,8,0,4">
+                                            <TextBlock Text="{loc:Loc Key=Prompt.Advanced.Description}" Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,0,0,10" TextWrapping="Wrap" />
+                                            <CheckBox x:Name="VoiceThinkingCheckBox" Content="{loc:Loc Key=Prompt.Advanced.Thinking}" Checked="PromptGenerationSetting_Changed" Unchecked="PromptGenerationSetting_Changed" ToolTip="{loc:Loc Key=Prompt.Advanced.Thinking.Tooltip}" />
+                                            <Grid Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="160" /><ColumnDefinition Width="130" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Style="{StaticResource FieldLabelStyle}" Text="{loc:Loc Key=Prompt.Advanced.Temperature}" /><TextBox x:Name="VoiceTemperatureTextBox" Grid.Column="1" TextChanged="PromptEditor_TextChanged" ToolTip="{loc:Loc Key=Prompt.Advanced.Temperature.Tooltip}" /></Grid>
+                                            <Grid Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="160" /><ColumnDefinition Width="130" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Style="{StaticResource FieldLabelStyle}" Text="{loc:Loc Key=Prompt.Advanced.TopP}" /><TextBox x:Name="VoiceTopPTextBox" Grid.Column="1" TextChanged="PromptEditor_TextChanged" ToolTip="{loc:Loc Key=Prompt.Advanced.TopP.Tooltip}" /></Grid>
+                                            <Grid Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="160" /><ColumnDefinition Width="130" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Style="{StaticResource FieldLabelStyle}" Text="{loc:Loc Key=Prompt.Advanced.MaxTokens}" /><TextBox x:Name="VoiceMaxTokensTextBox" Grid.Column="1" TextChanged="PromptEditor_TextChanged" ToolTip="{loc:Loc Key=Prompt.Advanced.MaxTokens.Tooltip}" /></Grid>
+                                        </StackPanel>
+                                    </Expander>
                                 </StackPanel>
                             </ScrollViewer>
                         </TabItem>
@@ -857,6 +893,15 @@
                                     <TextBlock Style="{StaticResource FieldLabelStyle}" Text="{loc:Loc Key=Prompt.Subtitle.Task}" Margin="0,16,0,0" />
                                     <TextBlock Text="{loc:Loc Key=Prompt.Subtitle.TaskDescription}" Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,4,0,7" TextWrapping="Wrap" />
                                     <TextBox x:Name="SubtitleTranslationPromptTextBox" Style="{StaticResource PromptEditorStyle}" TextChanged="PromptEditor_TextChanged" ToolTip="{loc:Loc Key=Prompt.Subtitle.TaskTooltip}" />
+                                    <Expander x:Name="SubtitlePromptAdvancedExpander" Header="{loc:Loc Key=Prompt.Advanced}" IsExpanded="False" Margin="0,16,0,0">
+                                        <StackPanel Margin="0,8,0,4">
+                                            <TextBlock Text="{loc:Loc Key=Prompt.Advanced.Description}" Foreground="{StaticResource MutedTextBrush}" FontSize="10" Margin="0,0,0,10" TextWrapping="Wrap" />
+                                            <CheckBox x:Name="SubtitleThinkingCheckBox" Content="{loc:Loc Key=Prompt.Advanced.Thinking}" Checked="PromptGenerationSetting_Changed" Unchecked="PromptGenerationSetting_Changed" ToolTip="{loc:Loc Key=Prompt.Advanced.Thinking.Tooltip}" />
+                                            <Grid Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="160" /><ColumnDefinition Width="130" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Style="{StaticResource FieldLabelStyle}" Text="{loc:Loc Key=Prompt.Advanced.Temperature}" /><TextBox x:Name="SubtitleTemperatureTextBox" Grid.Column="1" TextChanged="PromptEditor_TextChanged" ToolTip="{loc:Loc Key=Prompt.Advanced.Temperature.Tooltip}" /></Grid>
+                                            <Grid Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="160" /><ColumnDefinition Width="130" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Style="{StaticResource FieldLabelStyle}" Text="{loc:Loc Key=Prompt.Advanced.TopP}" /><TextBox x:Name="SubtitleTopPTextBox" Grid.Column="1" TextChanged="PromptEditor_TextChanged" ToolTip="{loc:Loc Key=Prompt.Advanced.TopP.Tooltip}" /></Grid>
+                                            <Grid Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="160" /><ColumnDefinition Width="130" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Style="{StaticResource FieldLabelStyle}" Text="{loc:Loc Key=Prompt.Advanced.MaxTokens}" /><TextBox x:Name="SubtitleMaxTokensTextBox" Grid.Column="1" TextChanged="PromptEditor_TextChanged" ToolTip="{loc:Loc Key=Prompt.Advanced.MaxTokens.Tooltip}" /></Grid>
+                                        </StackPanel>
+                                    </Expander>
                                 </StackPanel>
                             </ScrollViewer>
                         </TabItem>

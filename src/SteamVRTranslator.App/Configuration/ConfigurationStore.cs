@@ -63,6 +63,14 @@ public sealed class ConfigurationStore
         }
 
         var legacyBackend = translation["backend"]?.GetValue<string>();
+        if (!translation.ContainsKey("promptGeneration"))
+        {
+            var disableThinking = translation["disableThinking"]?.GetValue<bool>() ?? true;
+            translation["promptGeneration"] = JsonSerializer.SerializeToNode(
+                PromptGenerationSettingsConfiguration.FromLegacyDisableThinking(disableThinking),
+                Options);
+        }
+
         if (!translation.ContainsKey("providers"))
         {
             var baseUrl = translation["baseUrl"]?.GetValue<string>() ??
@@ -243,6 +251,8 @@ public sealed class ConfigurationStore
     internal static void NormalizeProviders(TranslationConfiguration translation)
     {
         translation.PromptProviders ??= new PromptProviderConfiguration();
+        translation.PromptGeneration ??= new PromptGenerationSettingsConfiguration();
+        translation.PromptGeneration.Normalize();
         translation.Providers ??= [];
         var mockProviders = translation.Providers.Where(provider => provider.IsMock).ToList();
         var mock = mockProviders.FirstOrDefault();

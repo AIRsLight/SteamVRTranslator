@@ -20,6 +20,62 @@ public sealed class ConfigurationMigrationTests
     }
 
     [Fact]
+    public void PromptGenerationSettingsAreIndependentAndUseCompatibilityDefaults()
+    {
+        var settings = new PromptGenerationSettingsConfiguration();
+        var purposes = Enum.GetValues<PromptProviderPurpose>();
+
+        Assert.All(purposes, purpose =>
+        {
+            var generation = settings.GetFor(purpose);
+            Assert.False(generation.EnableThinking);
+            Assert.Equal(PromptGenerationConfiguration.DefaultTemperature, generation.Temperature);
+            Assert.Equal(PromptGenerationConfiguration.DefaultTopP, generation.TopP);
+            Assert.Equal(
+                PromptGenerationConfiguration.ProviderDefaultMaximumOutputTokens,
+                generation.MaximumOutputTokens);
+        });
+        Assert.Equal(
+            purposes.Length,
+            purposes.Select(settings.GetFor).Distinct(ReferenceEqualityComparer.Instance).Count());
+
+        var clone = settings.Clone();
+        clone.CustomCommand.Temperature = 1.25;
+
+        Assert.Equal(0, settings.CustomCommand.Temperature);
+        Assert.Equal(1.25, clone.CustomCommand.Temperature);
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void LegacyGlobalThinkingSettingMigratesToEveryPromptType(
+        bool disableThinking,
+        bool expectedEnableThinking)
+    {
+        var migrated = ConfigurationStore.MigrateLegacyProviderConfiguration(
+            JsonSerializer.Serialize(new { translation = new { disableThinking } }));
+        using var document = JsonDocument.Parse(migrated);
+        var generation = document.RootElement
+            .GetProperty("translation")
+            .GetProperty("promptGeneration");
+
+        foreach (var propertyName in new[]
+                 {
+                     "directTranslation",
+                     "layoutTranslation",
+                     "customCommand",
+                     "voiceTranslation",
+                     "subtitleTranslation"
+                 })
+        {
+            Assert.Equal(
+                expectedEnableThinking,
+                generation.GetProperty(propertyName).GetProperty("enableThinking").GetBoolean());
+        }
+    }
+
+    [Fact]
     public void PromptProviderFallsBackToGlobalWhenNotAssignedOrMissing()
     {
         var translation = new TranslationConfiguration

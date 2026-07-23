@@ -311,6 +311,51 @@ public sealed class MainWindowLayoutTests
         Assert.Null(failure);
     }
 
+    [Fact]
+    public void PromptGenerationSettingsAreCollapsedByDefault()
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            MainWindow? window = null;
+            try
+            {
+                window = new MainWindow();
+                foreach (var name in new[]
+                         {
+                             "DirectPromptAdvancedExpander",
+                             "LayoutPromptAdvancedExpander",
+                             "CustomPromptAdvancedExpander",
+                             "VoicePromptAdvancedExpander",
+                             "SubtitlePromptAdvancedExpander"
+                         })
+                {
+                    Assert.False(Assert.IsType<Expander>(window.FindName(name)).IsExpanded);
+                }
+
+                Assert.Equal("0", Assert.IsType<TextBox>(
+                    window.FindName("DirectTemperatureTextBox")).Text);
+                Assert.Equal("1", Assert.IsType<TextBox>(
+                    window.FindName("DirectTopPTextBox")).Text);
+                Assert.Equal("0", Assert.IsType<TextBox>(
+                    window.FindName("DirectMaxTokensTextBox")).Text);
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+            finally
+            {
+                window?.Close();
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        Assert.Null(failure);
+    }
+
     private static T FindVisualDescendant<T>(DependencyObject root)
         where T : DependencyObject
     {

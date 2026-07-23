@@ -24,6 +24,31 @@ public sealed class MainWindowVisualLayoutTests
         new("prompts-custom", "PromptsNavButton", 2),
         new("prompts-voice", "PromptsNavButton", 3),
         new("prompts-subtitle", "PromptsNavButton", 4),
+        new(
+            "prompts-direct-advanced",
+            "PromptsNavButton",
+            0,
+            "DirectPromptAdvancedExpander"),
+        new(
+            "prompts-layout-advanced",
+            "PromptsNavButton",
+            1,
+            "LayoutPromptAdvancedExpander"),
+        new(
+            "prompts-custom-advanced",
+            "PromptsNavButton",
+            2,
+            "CustomPromptAdvancedExpander"),
+        new(
+            "prompts-voice-advanced",
+            "PromptsNavButton",
+            3,
+            "VoicePromptAdvancedExpander"),
+        new(
+            "prompts-subtitle-advanced",
+            "PromptsNavButton",
+            4,
+            "SubtitlePromptAdvancedExpander"),
         new("voice", "VoiceNavButton"),
         new("subtitles", "SubtitlesNavButton"),
         new(
@@ -182,12 +207,35 @@ public sealed class MainWindowVisualLayoutTests
         {
             window.PromptTabControl.SelectedIndex = tab;
         }
+        Expander? advancedExpander = null;
+        foreach (var expanderName in new[]
+                 {
+                     "DirectPromptAdvancedExpander",
+                     "LayoutPromptAdvancedExpander",
+                     "CustomPromptAdvancedExpander",
+                     "VoicePromptAdvancedExpander",
+                     "SubtitlePromptAdvancedExpander"
+                 })
+        {
+            var expander = Assert.IsType<Expander>(window.FindName(expanderName));
+            expander.IsExpanded =
+                string.Equals(expanderName, view.PromptAdvancedExpander, StringComparison.Ordinal);
+            if (expander.IsExpanded)
+            {
+                advancedExpander = expander;
+            }
+        }
         if (!string.IsNullOrWhiteSpace(view.SubtitleBackend))
         {
             SelectSubtitleBackendForVisualTest(window, view.SubtitleBackend);
         }
 
         PumpLayout(window);
+        if (advancedExpander is not null)
+        {
+            advancedExpander.BringIntoView();
+            PumpLayout(window);
+        }
     }
 
     private static void SelectSubtitleBackendForVisualTest(MainWindow window, string backend)
@@ -296,8 +344,30 @@ public sealed class MainWindowVisualLayoutTests
 
         try
         {
-            return element.TransformToAncestor(window).TransformBounds(
+            var bounds = element.TransformToAncestor(window).TransformBounds(
                 new Rect(0, 0, element.ActualWidth, element.ActualHeight));
+            for (var current = VisualTreeHelper.GetParent(element);
+                 current is not null && !ReferenceEquals(current, window);
+                 current = VisualTreeHelper.GetParent(current))
+            {
+                if (current is not FrameworkElement viewport ||
+                    current is not (ScrollViewer or ScrollContentPresenter) ||
+                    viewport.ActualWidth <= 0 ||
+                    viewport.ActualHeight <= 0)
+                {
+                    continue;
+                }
+
+                var viewportBounds = viewport.TransformToAncestor(window).TransformBounds(
+                    new Rect(0, 0, viewport.ActualWidth, viewport.ActualHeight));
+                bounds = Rect.Intersect(bounds, viewportBounds);
+                if (bounds.IsEmpty)
+                {
+                    return null;
+                }
+            }
+
+            return bounds;
         }
         catch (InvalidOperationException)
         {
@@ -364,6 +434,7 @@ public sealed class MainWindowVisualLayoutTests
         string Name,
         string NavigationButton,
         int? PromptTab = null,
+        string? PromptAdvancedExpander = null,
         string? SubtitleBackend = null);
 
     private sealed record WindowSize(string Name, double Width, double Height);

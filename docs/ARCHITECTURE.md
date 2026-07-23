@@ -46,7 +46,7 @@ The result surface is rendered from an offscreen read-only WPF `TextBox`, whose 
 
 ## Prompt configuration
 
-Markdown translation, HTML layout translation and custom voice commands each own a system prompt and a task prompt. The editable task prompt contains only behavioral instructions: the pipeline appends the selected target language or transcribed user command as required context after it. Prompt edits are debounced, persisted atomically and passed to `TranslationPipeline.ApplyLiveSettings`, so the next request observes a complete prompt snapshot without recreating the SteamVR runtime.
+Markdown translation, HTML layout translation, custom voice commands, voice translation and subtitle translation each own a system prompt, task prompt, provider override and generation settings. Generation settings are independent by prompt purpose and include Qwen-compatible thinking, temperature, top-p and an optional maximum output-token limit. The editable task prompt contains only behavioral instructions: the pipeline appends the selected target language or transcribed user command as required context after it. Prompt edits are debounced, persisted atomically and passed to `TranslationPipeline.ApplyLiveSettings`, so the next request observes a complete prompt snapshot without recreating the SteamVR runtime.
 
 ## Replaceable boundaries
 

@@ -15,6 +15,7 @@ public sealed class OpenAiCompatibleVisionBackend : ITranslationBackend
     private readonly string _customCommandSystemPrompt;
     private readonly string _customCommandPrompt;
     private readonly TimeSpan _responseIdleTimeout;
+    private readonly PromptProviderPurpose _textTranslationPurpose;
 
     public OpenAiCompatibleVisionBackend(
         TranslationConfiguration configuration,
@@ -22,7 +23,8 @@ public sealed class OpenAiCompatibleVisionBackend : ITranslationBackend
         string? customCommandSystemPrompt = null,
         string? customCommandPrompt = null,
         TimeSpan? responseIdleTimeout = null,
-        string? providerId = null)
+        string? providerId = null,
+        PromptProviderPurpose textTranslationPurpose = PromptProviderPurpose.VoiceTranslation)
     {
         _configuration = configuration;
         var selectedProviderId = string.IsNullOrWhiteSpace(providerId)
@@ -44,6 +46,7 @@ public sealed class OpenAiCompatibleVisionBackend : ITranslationBackend
             : customCommandSystemPrompt.Trim();
         _customCommandPrompt = customCommandPrompt ?? BuiltInPromptDefaults.CustomCommandPrompt;
         _responseIdleTimeout = responseIdleTimeout ?? DefaultResponseIdleTimeout;
+        _textTranslationPurpose = textTranslationPurpose;
         if (_responseIdleTimeout <= TimeSpan.Zero && _responseIdleTimeout != Timeout.InfiniteTimeSpan)
         {
             throw new ArgumentOutOfRangeException(
@@ -66,6 +69,7 @@ public sealed class OpenAiCompatibleVisionBackend : ITranslationBackend
             _configuration.SystemPrompt,
             _provider.ApiKey,
             _configuration.EnableStreaming,
+            _configuration.PromptGeneration.GetFor(PromptProviderPurpose.DirectTranslation),
             onPartialResult,
             cancellationToken);
     }
@@ -83,6 +87,7 @@ public sealed class OpenAiCompatibleVisionBackend : ITranslationBackend
             _configuration.LayoutTranslationSystemPrompt,
             _provider.ApiKey,
             _configuration.EnableStreaming,
+            _configuration.PromptGeneration.GetFor(PromptProviderPurpose.LayoutTranslation),
             onPartialResult: null,
             cancellationToken);
     }
@@ -112,6 +117,7 @@ public sealed class OpenAiCompatibleVisionBackend : ITranslationBackend
             _customCommandSystemPrompt,
             _provider.ApiKey,
             _configuration.EnableStreaming,
+            _configuration.PromptGeneration.GetFor(PromptProviderPurpose.CustomCommand),
             onPartialResult,
             cancellationToken,
             messages);
@@ -144,6 +150,7 @@ public sealed class OpenAiCompatibleVisionBackend : ITranslationBackend
             systemPrompt,
             _provider.ApiKey,
             _configuration.EnableStreaming,
+            _configuration.PromptGeneration.GetFor(_textTranslationPurpose),
             onPartialResult,
             cancellationToken,
             messages);
@@ -155,6 +162,7 @@ public sealed class OpenAiCompatibleVisionBackend : ITranslationBackend
         string systemPrompt,
         string apiKey,
         bool stream,
+        PromptGenerationConfiguration generation,
         Action<string>? onPartialResult,
         CancellationToken cancellationToken,
         IReadOnlyList<object>? messages = null)
@@ -165,13 +173,18 @@ public sealed class OpenAiCompatibleVisionBackend : ITranslationBackend
         var payload = new Dictionary<string, object?>
         {
             ["model"] = _provider.Model,
-            ["temperature"] = 0,
+            ["temperature"] = generation.Temperature,
+            ["top_p"] = generation.TopP,
             ["stream"] = stream,
             ["messages"] = messages ?? BuildVisionMessages(imageBytes, prompt, systemPrompt)
         };
-        if (_configuration.DisableThinking && UsesQwenThinkingProtocol(endpoint, _provider.Model))
+        if (generation.MaximumOutputTokens > 0)
         {
-            payload["enable_thinking"] = false;
+            payload["max_tokens"] = generation.MaximumOutputTokens;
+        }
+        if (UsesQwenThinkingProtocol(endpoint, _provider.Model))
+        {
+            payload["enable_thinking"] = generation.EnableThinking;
         }
 
         using var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
@@ -194,6 +207,7 @@ public sealed class OpenAiCompatibleVisionBackend : ITranslationBackend
                     systemPrompt,
                     apiKey,
                     stream: false,
+                    generation,
                     onPartialResult,
                     cancellationToken,
                     messages);

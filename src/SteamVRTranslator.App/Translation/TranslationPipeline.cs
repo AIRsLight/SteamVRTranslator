@@ -258,7 +258,8 @@ public sealed class TranslationPipeline : IDisposable
 
     private ITranslationBackend CreateBackend(
         TranslationConfiguration translationConfiguration,
-        TranslationProviderConfiguration provider)
+        TranslationProviderConfiguration provider,
+        PromptProviderPurpose textTranslationPurpose = PromptProviderPurpose.VoiceTranslation)
     {
         if (provider.IsMock)
         {
@@ -275,7 +276,8 @@ public sealed class TranslationPipeline : IDisposable
                 _httpClient,
                 Volatile.Read(ref _customCommandSystemPrompt),
                 Volatile.Read(ref _customCommandPrompt),
-                providerId: provider.Id);
+                providerId: provider.Id,
+                textTranslationPurpose: textTranslationPurpose);
         }
 
         throw new InvalidOperationException($"不支持的翻译提供商类型：{provider.Type}");
