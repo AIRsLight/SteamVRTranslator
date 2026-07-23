@@ -558,10 +558,10 @@ internal sealed class OverlayRenderer
 
             if (!_arranged || layoutChanged)
             {
-                _border.Measure(new Size(_width, _height));
-                _border.Arrange(new Rect(0, 0, _width, _height));
                 _border.ApplyTemplate();
                 _content?.ApplyTemplate();
+                _border.Measure(new Size(_width, _height));
+                _border.Arrange(new Rect(0, 0, _width, _height));
                 _border.UpdateLayout();
                 _scrollViewer = _content as ScrollViewer ??
                                 (_content is null ? null : FindVisualChild<ScrollViewer>(_content));
