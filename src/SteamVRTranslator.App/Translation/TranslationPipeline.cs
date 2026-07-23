@@ -260,28 +260,13 @@ public sealed class TranslationPipeline : IDisposable
         TranslationConfiguration translationConfiguration,
         TranslationProviderConfiguration provider,
         PromptProviderPurpose textTranslationPurpose = PromptProviderPurpose.VoiceTranslation)
-    {
-        if (provider.IsMock)
-        {
-            return new MockTranslationBackend();
-        }
-
-        if (string.Equals(
-                provider.Type,
-                TranslationProviderConfiguration.OpenAiCompatibleType,
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return new OpenAiCompatibleVisionBackend(
-                translationConfiguration,
-                _httpClient,
-                Volatile.Read(ref _customCommandSystemPrompt),
-                Volatile.Read(ref _customCommandPrompt),
-                providerId: provider.Id,
-                textTranslationPurpose: textTranslationPurpose);
-        }
-
-        throw new InvalidOperationException($"不支持的翻译提供商类型：{provider.Type}");
-    }
+        => TranslationBackendFactory.Create(
+            translationConfiguration,
+            provider,
+            _httpClient,
+            Volatile.Read(ref _customCommandSystemPrompt),
+            Volatile.Read(ref _customCommandPrompt),
+            textTranslationPurpose);
 
     private static string ProviderDescription(TranslationProviderConfiguration provider) =>
         $"{provider.DisplayName} ({provider.Type})";

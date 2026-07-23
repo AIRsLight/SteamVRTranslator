@@ -389,6 +389,8 @@ public sealed class TranslationProviderConfiguration
     public const string MockProviderId = "mock";
     public const string MockType = "mock";
     public const string OpenAiCompatibleType = "openai-compatible";
+    public const string GoogleAiStudioType = "google-ai-studio";
+    public const string OpenAiDefaultBaseUrl = "https://api.openai.com/v1";
 
     public string Id { get; set; } = "openai";
 
@@ -396,7 +398,7 @@ public sealed class TranslationProviderConfiguration
 
     public string Type { get; set; } = OpenAiCompatibleType;
 
-    public string BaseUrl { get; set; } = "https://api.openai.com/v1";
+    public string BaseUrl { get; set; } = OpenAiDefaultBaseUrl;
 
     public string ApiKey { get; set; } = string.Empty;
 
@@ -406,6 +408,10 @@ public sealed class TranslationProviderConfiguration
 
     [JsonIgnore]
     public bool IsMock => string.Equals(Type, MockType, StringComparison.OrdinalIgnoreCase);
+
+    [JsonIgnore]
+    public bool IsGoogleAiStudio =>
+        string.Equals(Type, GoogleAiStudioType, StringComparison.OrdinalIgnoreCase);
 
     [JsonIgnore]
     public string DisplayName

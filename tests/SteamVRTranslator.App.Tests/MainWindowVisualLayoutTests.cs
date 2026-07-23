@@ -18,7 +18,14 @@ public sealed class MainWindowVisualLayoutTests
     private static readonly WindowView[] Views =
     [
         new("capture", "CaptureNavButton"),
-        new("providers", "ProviderNavButton"),
+        new(
+            "providers",
+            "ProviderNavButton",
+            ProviderType: TranslationProviderConfiguration.MockType),
+        new(
+            "providers-google",
+            "ProviderNavButton",
+            ProviderType: TranslationProviderConfiguration.GoogleAiStudioType),
         new("prompts-direct", "PromptsNavButton", 0),
         new("prompts-layout", "PromptsNavButton", 1),
         new("prompts-custom", "PromptsNavButton", 2),
@@ -229,6 +236,10 @@ public sealed class MainWindowVisualLayoutTests
         {
             SelectSubtitleBackendForVisualTest(window, view.SubtitleBackend);
         }
+        if (!string.IsNullOrWhiteSpace(view.ProviderType))
+        {
+            SelectProviderTypeForVisualTest(window, view.ProviderType);
+        }
 
         PumpLayout(window);
         if (advancedExpander is not null)
@@ -264,6 +275,34 @@ public sealed class MainWindowVisualLayoutTests
         typeof(MainWindow)
             .GetMethod("UpdateSubtitleAsrPanel", BindingFlags.Instance | BindingFlags.NonPublic)!
             .Invoke(window, null);
+    }
+
+    private static void SelectProviderTypeForVisualTest(MainWindow window, string providerType)
+    {
+        var provider = window.ProviderListBox.Items
+            .OfType<TranslationProviderConfiguration>()
+            .FirstOrDefault(item => string.Equals(
+                item.Type,
+                providerType,
+                StringComparison.OrdinalIgnoreCase));
+        if (provider is null &&
+            string.Equals(
+                providerType,
+                TranslationProviderConfiguration.GoogleAiStudioType,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            window.AddProviderButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            window.ProviderTypeComboBox.SelectedItem = window.ProviderTypeComboBox.Items
+                .OfType<ComboBoxItem>()
+                .Single(item => string.Equals(
+                    item.Tag as string,
+                    providerType,
+                    StringComparison.OrdinalIgnoreCase));
+            return;
+        }
+
+        window.ProviderListBox.SelectedItem = Assert.IsType<TranslationProviderConfiguration>(
+            provider);
     }
 
     private static void PumpLayout(Window window)
@@ -435,7 +474,8 @@ public sealed class MainWindowVisualLayoutTests
         string NavigationButton,
         int? PromptTab = null,
         string? PromptAdvancedExpander = null,
-        string? SubtitleBackend = null);
+        string? SubtitleBackend = null,
+        string? ProviderType = null);
 
     private sealed record WindowSize(string Name, double Width, double Height);
 

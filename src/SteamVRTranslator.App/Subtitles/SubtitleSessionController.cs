@@ -548,13 +548,11 @@ public sealed class SubtitleSessionController : IDisposable
                 provider.Id,
                 provider.MaxConcurrency,
                 cancellationToken);
-            ITranslationBackend backend = provider.IsMock
-                ? new MockTranslationBackend()
-                : new OpenAiCompatibleVisionBackend(
-                    _configuration.Translation,
-                    _httpClient,
-                    providerId: provider.Id,
-                    textTranslationPurpose: PromptProviderPurpose.SubtitleTranslation);
+            var backend = TranslationBackendFactory.Create(
+                _configuration.Translation,
+                provider,
+                _httpClient,
+                textTranslationPurpose: PromptProviderPurpose.SubtitleTranslation);
             var translated = await backend.TranslateTextAsync(
                 sourceText,
                 _configuration.Subtitles.TargetLanguage,
