@@ -720,9 +720,9 @@
                                 <StackPanel>
                                     <Grid Margin="0,0,0,14">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                        <StackPanel>
+                                        <StackPanel Margin="0,0,18,0">
                                             <TextBlock x:Name="ProviderEditorTitleText" Text="{loc:Loc Key=Provider.Editor.Title}" FontSize="15" FontWeight="SemiBold" />
-                                            <TextBlock x:Name="ProviderEditorDescriptionText" Text="{loc:Loc Key=Provider.Editor.Empty}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,4,0,0" />
+                                            <TextBlock x:Name="ProviderEditorDescriptionText" Text="{loc:Loc Key=Provider.Editor.Empty}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
                                         </StackPanel>
                                         <CheckBox x:Name="ProviderActiveCheckBox" Grid.Column="1" Content="{loc:Loc Key=Provider.Enabled}"
                                                   Click="ProviderActiveCheckBox_Click" ToolTip="{loc:Loc Key=Provider.Activate.Tooltip}" />
@@ -741,13 +741,18 @@
                                     <StackPanel x:Name="CompatibleProviderPanel">
                                         <Grid>
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="160" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                                            <TextBlock Style="{StaticResource FieldLabelStyle}" Text="Base URL" />
-                                            <TextBox x:Name="BaseUrlTextBox" Grid.Column="1" ToolTip="{loc:Loc Key=Provider.BaseUrl.Tooltip}" TextChanged="ProviderField_TextChanged" />
-                                            <TextBlock Grid.Row="1" Style="{StaticResource FieldLabelStyle}" Text="API Key" Margin="0,12,0,0" />
-                                            <PasswordBox x:Name="ApiKeyPasswordBox" Grid.Row="1" Grid.Column="1" Margin="0,12,0,0" ToolTip="{loc:Loc Key=Provider.ApiKey.Tooltip}" PasswordChanged="ProviderField_PasswordChanged" />
-                                            <TextBlock Grid.Row="2" Style="{StaticResource FieldLabelStyle}" Text="{loc:Loc Key=Provider.Model}" Margin="0,12,0,0" />
-                                            <Grid Grid.Row="2" Grid.Column="1" Margin="0,12,0,0">
+                                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                            <TextBlock Style="{StaticResource FieldLabelStyle}" Text="{loc:Loc Key=Provider.Type}" />
+                                            <ComboBox x:Name="ProviderTypeComboBox" Grid.Column="1" SelectionChanged="ProviderTypeComboBox_SelectionChanged" ToolTip="{loc:Loc Key=Provider.Type.Tooltip}">
+                                                <ComboBoxItem Content="{loc:Loc Key=Provider.Type.OpenAiCompatible}" Tag="openai-compatible" />
+                                                <ComboBoxItem Content="{loc:Loc Key=Provider.Type.GoogleAiStudio}" Tag="google-ai-studio" />
+                                            </ComboBox>
+                                            <TextBlock Grid.Row="1" Style="{StaticResource FieldLabelStyle}" Text="Base URL" Margin="0,12,0,0" />
+                                            <TextBox x:Name="BaseUrlTextBox" Grid.Row="1" Grid.Column="1" Margin="0,12,0,0" ToolTip="{loc:Loc Key=Provider.BaseUrl.Tooltip}" TextChanged="ProviderField_TextChanged" />
+                                            <TextBlock Grid.Row="2" Style="{StaticResource FieldLabelStyle}" Text="API Key" Margin="0,12,0,0" />
+                                            <PasswordBox x:Name="ApiKeyPasswordBox" Grid.Row="2" Grid.Column="1" Margin="0,12,0,0" ToolTip="{loc:Loc Key=Provider.ApiKey.Tooltip}" PasswordChanged="ProviderField_PasswordChanged" />
+                                            <TextBlock Grid.Row="3" Style="{StaticResource FieldLabelStyle}" Text="{loc:Loc Key=Provider.Model}" Margin="0,12,0,0" />
+                                            <Grid Grid.Row="3" Grid.Column="1" Margin="0,12,0,0">
                                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                                 <ComboBox x:Name="ProviderModelComboBox" IsEditable="True" IsTextSearchEnabled="False" IsSynchronizedWithCurrentItem="False" StaysOpenOnEdit="True" SelectionChanged="ProviderModelComboBox_SelectionChanged" ToolTip="{loc:Loc Key=Provider.Model.Tooltip}" />
                                                 <Button x:Name="RefreshProviderButton" Grid.Column="1" Style="{StaticResource ActionButtonStyle}" Margin="8,0,0,0" Click="RefreshProviderButton_Click" ToolTip="{loc:Loc Key=Provider.Test.Tooltip}">

@@ -30,6 +30,7 @@ public partial class MainWindow : Window
     private readonly AppLog _log;
     private readonly HttpClient _providerHttpClient = new() { Timeout = TimeSpan.FromSeconds(20) };
     private readonly OpenAiCompatibleProviderClient _providerClient;
+    private readonly GoogleAiStudioProviderClient _googleProviderClient;
     private readonly SenseVoiceDownloadService _senseVoiceDownloads;
     private readonly SubtitleDiarizationDownloadService _subtitleModelDownloads;
     private readonly AndroidMirrorRuntimeService _androidMirrorRuntime = new();
@@ -98,6 +99,7 @@ public partial class MainWindow : Window
             TextBoxBase.TextChangedEvent,
             new TextChangedEventHandler(ProviderModelComboBox_TextChanged));
         _providerClient = new OpenAiCompatibleProviderClient(_providerHttpClient);
+        _googleProviderClient = new GoogleAiStudioProviderClient(_providerHttpClient);
         _senseVoiceDownloads = new SenseVoiceDownloadService(AppContext.BaseDirectory);
         _subtitleModelDownloads = new SubtitleDiarizationDownloadService(AppContext.BaseDirectory);
 
@@ -750,7 +752,7 @@ public partial class MainWindow : Window
             Id = Guid.NewGuid().ToString("N"),
             Name = T("Provider.NewName"),
             Type = TranslationProviderConfiguration.OpenAiCompatibleType,
-            BaseUrl = "https://api.openai.com/v1"
+            BaseUrl = TranslationProviderConfiguration.OpenAiDefaultBaseUrl
         };
         _providers.Add(provider);
         RefreshProviderList(provider);
@@ -1109,6 +1111,54 @@ public partial class MainWindow : Window
         ProviderConnectionText.Foreground = new SolidColorBrush(Color.FromRgb(102, 112, 106));
     }
 
+    private void ProviderTypeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_populatingProvider ||
+            ProviderListBox.SelectedItem is not TranslationProviderConfiguration selected ||
+            selected.IsMock ||
+            ProviderTypeComboBox.SelectedItem is null)
+        {
+            return;
+        }
+
+        var previousType = selected.Type;
+        var nextType = SelectedTag(ProviderTypeComboBox);
+        if (string.Equals(previousType, nextType, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _populatingProvider = true;
+        try
+        {
+            var currentBaseUrl = BaseUrlTextBox.Text.Trim();
+            selected.Type = nextType;
+            if (string.IsNullOrWhiteSpace(currentBaseUrl) ||
+                string.Equals(
+                    currentBaseUrl,
+                    DefaultBaseUrlForProviderType(previousType),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                selected.BaseUrl = DefaultBaseUrlForProviderType(nextType);
+                BaseUrlTextBox.Text = selected.BaseUrl;
+            }
+
+            selected.Model = string.Empty;
+            _providerModelCatalog.Remove(selected.Id);
+            BindProviderModels(selected, [], string.Empty, selectFirstWhenMissing: false);
+            UpdateProviderProtocolPresentation(selected);
+        }
+        finally
+        {
+            _populatingProvider = false;
+        }
+
+        ProviderListBox.Items.Refresh();
+        UpdateActiveProviderSummary();
+        ProviderConnectionText.Text = T("Provider.Connection.Changed");
+        ProviderConnectionText.Foreground = new SolidColorBrush(Color.FromRgb(102, 112, 106));
+    }
+
     private void ProviderModelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_populatingProvider ||
@@ -1234,7 +1284,15 @@ public partial class MainWindow : Window
         ProviderConnectionText.Foreground = new SolidColorBrush(Color.FromRgb(102, 112, 106));
         try
         {
-            var models = await _providerClient.GetModelsAsync(selected.BaseUrl, selected.ApiKey, CancellationToken.None);
+            var models = selected.IsGoogleAiStudio
+                ? await _googleProviderClient.GetModelsAsync(
+                    selected.BaseUrl,
+                    selected.ApiKey,
+                    CancellationToken.None)
+                : await _providerClient.GetModelsAsync(
+                    selected.BaseUrl,
+                    selected.ApiKey,
+                    CancellationToken.None);
             var previousModel = selected.Model;
             _populatingProvider = true;
             _providerModelCatalog[selected.Id] = models.ToList();
@@ -2465,13 +2523,11 @@ public partial class MainWindow : Window
 
         _populatingProvider = true;
         var isMock = selected.IsMock;
-        ProviderEditorTitleText.Text = T(isMock ? "Provider.Mock.Name" : "Provider.Compatible.Title");
-        ProviderEditorDescriptionText.Text = isMock
-            ? T("Provider.Mock.EditorDescription")
-            : T("Provider.Compatible.Description");
+        UpdateProviderProtocolPresentation(selected);
         MockProviderPanel.Visibility = isMock ? Visibility.Visible : Visibility.Collapsed;
         CompatibleProviderPanel.Visibility = isMock ? Visibility.Collapsed : Visibility.Visible;
         ProviderNameTextBox.Text = selected.Name;
+        SelectByTag(ProviderTypeComboBox, selected.Type);
         BaseUrlTextBox.Text = selected.BaseUrl;
         ApiKeyPasswordBox.Password = selected.ApiKey;
         var models = _providerModelCatalog.TryGetValue(selected.Id, out var discoveredModels)
@@ -2506,10 +2562,42 @@ public partial class MainWindow : Window
             return;
         }
 
+        selected.Type = SelectedTag(ProviderTypeComboBox);
         selected.BaseUrl = BaseUrlTextBox.Text.Trim();
         selected.ApiKey = ApiKeyPasswordBox.Password;
         selected.Model = ProviderModelComboBox.Text.Trim();
     }
+
+    private void UpdateProviderProtocolPresentation(
+        TranslationProviderConfiguration selected)
+    {
+        if (selected.IsMock)
+        {
+            ProviderEditorTitleText.Text = T("Provider.Mock.Name");
+            ProviderEditorDescriptionText.Text = T("Provider.Mock.EditorDescription");
+            return;
+        }
+
+        var google = selected.IsGoogleAiStudio;
+        ProviderEditorTitleText.Text = T(
+            google ? "Provider.Google.Title" : "Provider.Compatible.Title");
+        ProviderEditorDescriptionText.Text = T(
+            google ? "Provider.Google.Description" : "Provider.Compatible.Description");
+        BaseUrlTextBox.ToolTip = T(
+            google ? "Provider.Google.BaseUrl.Tooltip" : "Provider.BaseUrl.Tooltip");
+        ApiKeyPasswordBox.ToolTip = T(
+            google ? "Provider.Google.ApiKey.Tooltip" : "Provider.ApiKey.Tooltip");
+        ProviderModelComboBox.ToolTip = T(
+            google ? "Provider.Google.Model.Tooltip" : "Provider.Model.Tooltip");
+    }
+
+    private static string DefaultBaseUrlForProviderType(string? type) =>
+        string.Equals(
+            type,
+            TranslationProviderConfiguration.GoogleAiStudioType,
+            StringComparison.OrdinalIgnoreCase)
+            ? GoogleAiStudioProviderClient.DefaultBaseUrl
+            : TranslationProviderConfiguration.OpenAiDefaultBaseUrl;
 
     private void BindProviderModels(
         TranslationProviderConfiguration provider,
@@ -3894,11 +3982,17 @@ public partial class MainWindow : Window
         if (string.Equals(
                 activeProvider.Type,
                 TranslationProviderConfiguration.OpenAiCompatibleType,
-                StringComparison.OrdinalIgnoreCase))
+                StringComparison.OrdinalIgnoreCase) ||
+            activeProvider.IsGoogleAiStudio)
         {
             if (string.IsNullOrWhiteSpace(activeProvider.BaseUrl) || string.IsNullOrWhiteSpace(activeProvider.Model))
             {
                 throw new InvalidOperationException(T("Validation.ProviderEndpoint"));
+            }
+            if (activeProvider.IsGoogleAiStudio &&
+                string.IsNullOrWhiteSpace(activeProvider.ApiKey))
+            {
+                throw new InvalidOperationException(T("Validation.GoogleApiKey"));
             }
 
             return;
