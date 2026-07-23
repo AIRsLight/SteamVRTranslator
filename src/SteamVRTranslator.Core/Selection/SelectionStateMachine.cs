@@ -70,6 +70,7 @@ public sealed class SelectionStateMachine
         {
             if (!pointersAvailable)
             {
+                _lastFrameUsable = false;
                 return NoChange();
             }
 

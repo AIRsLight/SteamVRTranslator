@@ -100,4 +100,36 @@ public sealed class SelectionStateMachineTests
         Assert.Null(transition.Snapshot.LeftPointer);
         Assert.Null(transition.Snapshot.RightPointer);
     }
+
+    [Fact]
+    public void MissingPointersBeforeReleaseCannotLockThePreviousFrame()
+    {
+        var machine = new SelectionStateMachine();
+        machine.Toggle(Start);
+        machine.Update(
+            true,
+            true,
+            new(0.2f, 0.2f),
+            new(0.8f, 0.8f),
+            Start.AddSeconds(1));
+        machine.Update(
+            true,
+            true,
+            null,
+            null,
+            Start.AddSeconds(2),
+            frameUsable: false);
+
+        var transition = machine.Update(
+            false,
+            true,
+            null,
+            null,
+            Start.AddSeconds(3),
+            frameUsable: false);
+
+        Assert.Equal(SelectionTransitionKind.OrientationRejected, transition.Kind);
+        Assert.Equal(SelectionState.Armed, transition.Snapshot.State);
+        Assert.Null(transition.Snapshot.Region);
+    }
 }

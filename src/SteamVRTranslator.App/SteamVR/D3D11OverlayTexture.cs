@@ -37,13 +37,20 @@ internal sealed class D3D11OverlayDevice : IDisposable
 
     public ID3D11Texture2D CreateTexture() =>
         CreateTexture(
-            OverlayRenderer.Width,
-            OverlayRenderer.Height,
+            OverlayRenderer.TextureWidth,
+            OverlayRenderer.TextureHeight,
             BindFlags.ShaderResource | BindFlags.RenderTarget);
 
     public ID3D11Texture2D CreateTexture(int width, int height, BindFlags bindFlags) =>
+        CreateTexture(width, height, bindFlags, Format.R8G8B8A8_UNorm);
+
+    public ID3D11Texture2D CreateTexture(
+        int width,
+        int height,
+        BindFlags bindFlags,
+        Format format) =>
         _device.CreateTexture2D(new Texture2DDescription(
-            Format.R8G8B8A8_UNorm,
+            format,
             checked((uint)width),
             checked((uint)height),
             1,
@@ -53,7 +60,7 @@ internal sealed class D3D11OverlayDevice : IDisposable
             CpuAccessFlags.None));
 
     public void Upload(ID3D11Texture2D texture, byte[] rgba)
-        => Upload(texture, rgba, OverlayRenderer.Width, OverlayRenderer.Height);
+        => Upload(texture, rgba, OverlayRenderer.TextureWidth, OverlayRenderer.TextureHeight);
 
     public void Upload(ID3D11Texture2D texture, byte[] rgba, int width, int height)
     {
@@ -109,29 +116,39 @@ internal sealed class D3D11OverlayTexture : IDisposable
     private readonly ID3D11Texture2D[] _textures;
     private readonly int _width;
     private readonly int _height;
+    private readonly Format _format;
     private ulong _overlayHandle = OpenVR.k_ulOverlayHandleInvalid;
     private int _nextTextureIndex;
 
     public D3D11OverlayTexture(
         D3D11OverlayDevice device,
-        int width = OverlayRenderer.Width,
-        int height = OverlayRenderer.Height,
-        int bufferCount = 2)
+        int width = OverlayRenderer.TextureWidth,
+        int height = OverlayRenderer.TextureHeight,
+        int bufferCount = 2,
+        Format format = Format.R8G8B8A8_UNorm)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(width, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(height, 1);
         _device = device;
         _width = width;
         _height = height;
+        _format = format;
         _textures = Enumerable.Range(0, Math.Max(1, bufferCount))
             .Select(_ => device.CreateTexture(
                 width,
                 height,
-                BindFlags.ShaderResource | BindFlags.RenderTarget))
+                BindFlags.ShaderResource | BindFlags.RenderTarget,
+                format))
             .ToArray();
     }
 
     public void Attach(ulong overlayHandle) => _overlayHandle = overlayHandle;
+
+    public int Width => _width;
+
+    public int Height => _height;
+
+    public Format Format => _format;
 
     public void Update(byte[] rgba)
     {

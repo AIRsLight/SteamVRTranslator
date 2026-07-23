@@ -20,9 +20,12 @@ public sealed class MockCustomCommandBackend : ICustomCommandBackend
         }
 
         var original = command.Trim();
-        var response = string.Join(
-            Environment.NewLine + Environment.NewLine,
-            Enumerable.Repeat(original, RepetitionCount));
+        var response =
+            "# 自定义命令模拟结果" + Environment.NewLine + Environment.NewLine +
+            string.Join(
+                Environment.NewLine + Environment.NewLine,
+                Enumerable.Range(1, RepetitionCount)
+                    .Select(index => $"## 回答 {index}" + Environment.NewLine + Environment.NewLine + original));
         var streamed = new StringBuilder(response.Length);
         for (var offset = 0; offset < response.Length; offset += ChunkLength)
         {

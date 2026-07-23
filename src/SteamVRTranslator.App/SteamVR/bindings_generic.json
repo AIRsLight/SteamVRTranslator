@@ -1,7 +1,7 @@
 {
   "controller_type": "generic",
   "name": "SteamVR Translator generic bindings",
-  "description": "Left joystick selects or translates a touched capture; grips move overlays; right stick scrolls or toggles all spatial overlays.",
+  "description": "Left joystick translates a touched capture; grips move overlays; right stick scrolls, toggles all overlays, or closes a targeted overlay after a 0.67-second hold.",
   "bindings": {
     "/actions/global": {
       "sources": [

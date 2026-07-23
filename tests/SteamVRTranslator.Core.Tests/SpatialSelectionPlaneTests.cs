@@ -11,6 +11,27 @@ public sealed class SpatialSelectionPlaneTests
         Assert.Equal(35f, SpatialSelectionPlane.MaximumViewAngleDegrees);
     }
 
+    [Theory]
+    [InlineData(0.09f, 0.30f)]
+    [InlineData(0.30f, 0.09f)]
+    public void WidthAndHeightAreRejectedIndependentlyWhenTooNarrow(float width, float height)
+    {
+        var plane = new SpatialSelectionPlane(
+            default,
+            new Vector3f(1, 0, 0),
+            new Vector3f(0, 1, 0),
+            new Vector3f(0, 0, 1),
+            width,
+            height,
+            MathF.Max(width, height) * 1.15f,
+            default,
+            default,
+            0);
+
+        Assert.False(plane.HasUsableDimensions);
+        Assert.False(plane.IsUsable);
+    }
+
     [Fact]
     public void ControllersBecomeOppositeRectangleCorners()
     {

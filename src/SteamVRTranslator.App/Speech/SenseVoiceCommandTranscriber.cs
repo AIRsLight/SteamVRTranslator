@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using SteamVRTranslator.App.Configuration;
 using SteamVRTranslator.App.Diagnostics;
+using SteamVRTranslator.App.Localization;
 
 namespace SteamVRTranslator.App.Speech;
 
@@ -13,17 +14,41 @@ public sealed class SenseVoiceCommandTranscriber : IDisposable
     public SenseVoiceCommandTranscriber(SpeechConfiguration configuration, AppLog log)
     {
         _log = log;
-        var executablePath = ResolveRequiredPath(configuration.SenseVoiceExecutablePath, "SenseVoice 运行时");
+        var useVulkan = string.Equals(
+            configuration.SenseVoiceBackend,
+            "vulkan",
+            StringComparison.OrdinalIgnoreCase);
+        if (!useVulkan && !string.Equals(
+                configuration.SenseVoiceBackend,
+                "cpu",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"不支持的 SenseVoice 引擎：{configuration.SenseVoiceBackend}。");
+        }
+
+        var executablePath = ResolveRequiredPath(
+            useVulkan
+                ? configuration.SenseVoiceVulkanExecutablePath
+                : configuration.SenseVoiceExecutablePath,
+            useVulkan ? "SenseVoice Vulkan 运行时" : "SenseVoice CPU 运行时");
+        EnsureLanguageSelectionSupported(executablePath);
         var modelPath = ResolveRequiredPath(configuration.SenseVoiceModelPath, "SenseVoice 模型");
-        var arguments = new List<string> { "-m", modelPath };
+        string? vadPath = null;
         if (!string.IsNullOrWhiteSpace(configuration.SenseVoiceVadModelPath))
         {
-            arguments.Add("--vad");
-            arguments.Add(ResolveRequiredPath(configuration.SenseVoiceVadModelPath, "SenseVoice VAD 模型"));
+            vadPath = ResolveRequiredPath(
+                configuration.SenseVoiceVadModelPath,
+                "SenseVoice VAD 模型");
         }
+        var arguments = BuildArguments(configuration, modelPath, vadPath);
 
         _log.Info(
             $"[asr] 正在启动 SenseVoice 常驻进程：运行时={executablePath}，" +
+            $"引擎={(useVulkan ? "Vulkan" : "CPU")}，" +
+            $"GPU={configuration.SenseVoiceVulkanDeviceIndex?.ToString() ?? "None"}/" +
+            $"{configuration.SenseVoiceVulkanDeviceName ?? "None"}，" +
+            $"语言={configuration.EffectiveRecognitionLanguage}，" +
             $"模型={modelPath}，VAD={configuration.SenseVoiceVadModelPath}");
         _worker = new SenseVoiceResidentWorker(executablePath, arguments);
         _log.Info($"[asr] SenseVoice 常驻进程已就绪：PID={_worker.ProcessId}。");
@@ -66,6 +91,75 @@ public sealed class SenseVoiceCommandTranscriber : IDisposable
     }
 
     public void Dispose() => _worker.Dispose();
+
+    internal static IReadOnlyList<string> BuildArguments(
+        SpeechConfiguration configuration,
+        string modelPath,
+        string? vadPath)
+    {
+        List<string> arguments = ["-m", modelPath];
+        arguments.Add("--language");
+        arguments.Add(configuration.EffectiveRecognitionLanguage);
+        if (string.Equals(
+                configuration.SenseVoiceBackend,
+                "vulkan",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            arguments.Add("--backend");
+            arguments.Add("vulkan");
+            if (configuration.SenseVoiceVulkanDeviceIndex is { } deviceIndex)
+            {
+                if (deviceIndex < 0)
+                {
+                    throw new InvalidOperationException("SenseVoice Vulkan 设备序号不能为负数。");
+                }
+
+                arguments.Add("--device");
+                arguments.Add(deviceIndex.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+        }
+        if (!string.IsNullOrWhiteSpace(vadPath))
+        {
+            arguments.Add("--vad");
+            arguments.Add(vadPath);
+        }
+
+        return arguments;
+    }
+
+    internal static bool HelpTextSupportsLanguageSelection(string? helpText) =>
+        helpText?.Contains("--language", StringComparison.Ordinal) == true;
+
+    private static void EnsureLanguageSelectionSupported(string executablePath)
+    {
+        var startInfo = new ProcessStartInfo(executablePath)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        startInfo.ArgumentList.Add("--help");
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException(
+                AppLocalization.Text("Validation.AsrLanguageRuntime"));
+        var standardOutput = process.StandardOutput.ReadToEndAsync();
+        var standardError = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(5000))
+        {
+            process.Kill(entireProcessTree: true);
+            throw new InvalidOperationException(
+                AppLocalization.Text("Validation.AsrLanguageRuntime"));
+        }
+
+        var helpText = standardOutput.GetAwaiter().GetResult() +
+                       standardError.GetAwaiter().GetResult();
+        if (!HelpTextSupportsLanguageSelection(helpText))
+        {
+            throw new InvalidOperationException(
+                AppLocalization.Text("Validation.AsrLanguageRuntime"));
+        }
+    }
 
     private static string Preview(string text) =>
         text.Length <= 120 ? text : text[..120] + "...";
@@ -178,13 +272,19 @@ internal sealed class SenseVoiceResidentWorker : IDisposable
                 {
                     var text = Decode(response[7..]).Trim();
                     return text.Length == 0
-                        ? throw WorkerFailure("SenseVoice 没有识别到语音文本。")
+                        ? throw new NoSpeechRecognizedException("SenseVoice 没有识别到语音文本。")
                         : text;
                 }
 
                 if (response.StartsWith("ERROR\t", StringComparison.Ordinal))
                 {
-                    throw WorkerFailure($"SenseVoice 识别失败：{Decode(response[6..])}");
+                    var error = Decode(response[6..]);
+                    if (LooksLikeNoSpeech(error))
+                    {
+                        throw new NoSpeechRecognizedException("SenseVoice 没有识别到语音文本。");
+                    }
+
+                    throw WorkerFailure($"SenseVoice 识别失败：{error}");
                 }
 
                 throw WorkerFailure($"SenseVoice 返回了未知响应：{response}");
@@ -209,6 +309,20 @@ internal sealed class SenseVoiceResidentWorker : IDisposable
             _stderr.Clear();
             return diagnostics;
         }
+    }
+
+    internal static bool LooksLikeNoSpeech(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message) ||
+            message.Contains("read audio failed", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return message.Contains("0 vad segments", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("no transcription", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("no speech", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("没有识别到语音", StringComparison.OrdinalIgnoreCase);
     }
 
     public void Dispose()
@@ -304,3 +418,5 @@ internal sealed class SenseVoiceResidentWorker : IDisposable
         }
     }
 }
+
+public sealed class NoSpeechRecognizedException(string message) : InvalidOperationException(message);

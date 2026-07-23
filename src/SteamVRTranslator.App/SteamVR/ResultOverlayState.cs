@@ -1,3 +1,5 @@
+using SteamVRTranslator.App.Translation;
+
 namespace SteamVRTranslator.App.SteamVR;
 
 internal enum ResultStatus
@@ -10,10 +12,14 @@ internal enum ResultStatus
 internal sealed record ResultOverlaySnapshot(
     long RequestId,
     string Text,
+    string VisibleText,
+    ResultContentFormat ContentFormat,
+    byte[]? RenderedImage,
     ResultStatus Status,
     double ScrollOffset,
     bool IsVisible,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    AssistantConversationView? Chat = null);
 
 internal sealed class ResultOverlayState
 {
@@ -24,20 +30,30 @@ internal sealed class ResultOverlayState
 
     public bool IsVisible => _result?.IsVisible == true;
 
-    public long Begin(string placeholder)
+    public long Begin(
+        string placeholder,
+        ResultContentFormat contentFormat = ResultContentFormat.PlainText,
+        AssistantConversationView? chat = null)
     {
         var requestId = ++_nextRequestId;
         _result = new ResultOverlaySnapshot(
             requestId,
             placeholder,
+            placeholder,
+            contentFormat,
+            null,
             ResultStatus.Streaming,
             0,
             true,
-            DateTimeOffset.Now);
+            DateTimeOffset.Now,
+            chat);
         return requestId;
     }
 
-    public bool Update(long requestId, string text)
+    public bool Update(
+        long requestId,
+        string text,
+        AssistantConversationView? chat = null)
     {
         if (_result is not { } result ||
             result.RequestId != requestId ||
@@ -47,23 +63,47 @@ internal sealed class ResultOverlayState
             return false;
         }
 
-        _result = result with { Text = text };
+        _result = result with
+        {
+            Text = text,
+            VisibleText = text,
+            RenderedImage = null,
+            Chat = chat ?? result.Chat
+        };
         return true;
     }
 
-    public bool Complete(long requestId, string text, bool isError)
+    public bool Complete(
+        long requestId,
+        string text,
+        bool isError,
+        ResultContentFormat? contentFormat = null,
+        string? visibleText = null,
+        byte[]? renderedImage = null,
+        AssistantConversationView? chat = null)
     {
         if (_result is not { } result || result.RequestId != requestId)
         {
             return false;
         }
 
+        var finalText = string.IsNullOrWhiteSpace(text) ? result.Text : text;
         _result = result with
         {
-            Text = string.IsNullOrWhiteSpace(text) ? result.Text : text,
-            Status = isError ? ResultStatus.Error : ResultStatus.Completed
+            Text = finalText,
+            VisibleText = visibleText ?? finalText,
+            ContentFormat = contentFormat ?? result.ContentFormat,
+            RenderedImage = renderedImage,
+            Status = isError ? ResultStatus.Error : ResultStatus.Completed,
+            Chat = chat ?? result.Chat
         };
         return true;
+    }
+
+    public void Restore(ResultOverlaySnapshot snapshot)
+    {
+        _result = snapshot;
+        _nextRequestId = Math.Max(_nextRequestId, snapshot.RequestId);
     }
 
     public bool ToggleVisibility()
@@ -118,4 +158,5 @@ internal readonly record struct ResultProgressUpdate(
     long OperationId,
     int Sequence,
     string Text,
-    DateTimeOffset QueuedAt);
+    DateTimeOffset QueuedAt,
+    AssistantConversationView? Chat = null);

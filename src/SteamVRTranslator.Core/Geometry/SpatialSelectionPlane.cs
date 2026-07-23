@@ -14,11 +14,13 @@ public readonly record struct SpatialSelectionPlane(
     NormalizedPoint RightPointer,
     float ViewAngleDegrees)
 {
-    private const float MinimumDimension = 0.04f;
     private const float OverlayMargin = 1.15f;
+    public const float MinimumWidthMeters = 0.10f;
+    public const float MinimumHeightMeters = 0.10f;
     public const float MaximumViewAngleDegrees = 35f;
 
-    public bool HasUsableDimensions => Width >= MinimumDimension && Height >= MinimumDimension;
+    public bool HasUsableDimensions =>
+        Width >= MinimumWidthMeters && Height >= MinimumHeightMeters;
 
     public bool HasUsableOrientation => ViewAngleDegrees <= MaximumViewAngleDegrees;
 

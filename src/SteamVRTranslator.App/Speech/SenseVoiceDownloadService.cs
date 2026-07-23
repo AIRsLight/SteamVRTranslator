@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
+using SteamVRTranslator.App.Localization;
 
 namespace SteamVRTranslator.App.Speech;
 
@@ -45,7 +46,7 @@ public sealed class SenseVoiceDownloadService : IDisposable
         {
             if (_activeDownload is not null)
             {
-                throw new InvalidOperationException("已有 ASR 下载任务正在运行。");
+                throw new InvalidOperationException(AppLocalization.Text("Download.AlreadyRunning"));
             }
 
             operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -63,7 +64,7 @@ public sealed class SenseVoiceDownloadService : IDisposable
                 if (await IsValidAsync(asset, operationCancellation.Token))
                 {
                     completed += asset.Size;
-                    Report(asset, completed, total, "已校验");
+                    Report(asset, completed, total, "verified", "Download.AssetVerified");
                     continue;
                 }
 
@@ -78,7 +79,12 @@ public sealed class SenseVoiceDownloadService : IDisposable
 
             ProgressChanged?.Invoke(
                 this,
-                new SenseVoiceDownloadProgress("complete", string.Empty, total, total, "SenseVoice 已安装并校验。"));
+                new SenseVoiceDownloadProgress(
+                    "complete",
+                    string.Empty,
+                    total,
+                    total,
+                    AppLocalization.Text("Download.Complete")));
         }
         finally
         {
@@ -132,7 +138,7 @@ public sealed class SenseVoiceDownloadService : IDisposable
                 await DownloadOnceAsync(asset, useMirror, temporaryPath, completed, total, cancellationToken);
                 await VerifyFileAsync(temporaryPath, asset, cancellationToken);
                 File.Move(temporaryPath, targetPath, true);
-                Report(asset, completed + asset.Size, total, "已安装");
+                Report(asset, completed + asset.Size, total, "installed", "Download.AssetInstalled");
                 return;
             }
             catch (OperationCanceledException)
@@ -152,7 +158,10 @@ public sealed class SenseVoiceDownloadService : IDisposable
         }
 
         throw new InvalidOperationException(
-            $"下载 {asset.DisplayName} 失败，已重试 {MaximumAttempts} 次。",
+            AppLocalization.Format(
+                "Download.Failed",
+                LocalizeAssetName(asset),
+                MaximumAttempts),
             lastError);
     }
 
@@ -171,8 +180,11 @@ public sealed class SenseVoiceDownloadService : IDisposable
             cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
-            throw new InvalidOperationException(
-                $"下载服务器返回 HTTP {(int)response.StatusCode} ({response.ReasonPhrase})。URL={url}");
+            throw new InvalidOperationException(AppLocalization.Format(
+                "Download.ServerError",
+                (int)response.StatusCode,
+                response.ReasonPhrase,
+                url));
         }
 
         await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -201,10 +213,12 @@ public sealed class SenseVoiceDownloadService : IDisposable
                     this,
                     new SenseVoiceDownloadProgress(
                         "downloading",
-                        asset.DisplayName,
+                        LocalizeAssetName(asset),
                         completed + downloaded,
                         total,
-                        $"正在下载 {asset.DisplayName}"));
+                        AppLocalization.Format(
+                            "Download.AssetDownloading",
+                            LocalizeAssetName(asset))));
             }
         }
         finally
@@ -240,15 +254,20 @@ public sealed class SenseVoiceDownloadService : IDisposable
         var info = new FileInfo(path);
         if (info.Length != asset.Size)
         {
-            throw new InvalidDataException(
-                $"{asset.DisplayName} 文件长度不正确：预期 {asset.Size:N0}，实际 {info.Length:N0}。 ");
+            throw new InvalidDataException(AppLocalization.Format(
+                "Download.FileSizeMismatch",
+                LocalizeAssetName(asset),
+                asset.Size,
+                info.Length));
         }
 
         await using var stream = File.OpenRead(path);
         var hash = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken));
         if (!string.Equals(hash, asset.Sha256, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidDataException($"{asset.DisplayName} SHA-256 校验失败。");
+            throw new InvalidDataException(AppLocalization.Format(
+                "Download.HashMismatch",
+                LocalizeAssetName(asset)));
         }
     }
 
@@ -261,10 +280,28 @@ public sealed class SenseVoiceDownloadService : IDisposable
     private string ResolveTarget(SenseVoiceAsset asset) =>
         Path.GetFullPath(Path.Combine(_rootDirectory, asset.TargetPath));
 
-    private void Report(SenseVoiceAsset asset, long completed, long total, string state) =>
+    private void Report(
+        SenseVoiceAsset asset,
+        long completed,
+        long total,
+        string state,
+        string messageKey) =>
         ProgressChanged?.Invoke(
             this,
-            new SenseVoiceDownloadProgress(state, asset.DisplayName, completed, total, $"{asset.DisplayName}：{state}"));
+            new SenseVoiceDownloadProgress(
+                state,
+                LocalizeAssetName(asset),
+                completed,
+                total,
+                AppLocalization.Format(messageKey, LocalizeAssetName(asset))));
+
+    private static string LocalizeAssetName(SenseVoiceAsset asset) => asset.Id switch
+    {
+        "runtime-cpu" => AppLocalization.Text("Asr.Asset.CpuRuntime"),
+        "runtime-vulkan" => AppLocalization.Text("Asr.Asset.VulkanRuntime"),
+        "fsmn-vad" => AppLocalization.Text("Asr.Asset.Vad"),
+        _ => asset.DisplayName
+    };
 
     private static HttpClient CreateHttpClient()
     {
@@ -312,11 +349,21 @@ internal static class SenseVoiceAssetCatalog
         "runtime-cpu",
         "SenseVoice CPU 运行时",
         "AIRsLight/VRChatVoiceInput-Runtimes",
-        "2a188dfe4289b3a37d374dbd2352f0fa9ac5f5d0",
+        "677c2591e0b55d58842f0f52c9c82650a031086d",
         "runtimes/sensevoice-cpu/llama-funasr-sensevoice.exe",
         "runtimes/llama-funasr-sensevoice.exe",
-        1916416,
-        "977fcd532c7b1465a6e5b73916e0db878001adea0cf5bf94621e3c36ec59a745");
+        1917440,
+        "9505348a156e9455014785d995fa332d577b2b39b312838366bb945d33360cbd");
+
+    private static readonly SenseVoiceAsset VulkanRuntime = new(
+        "runtime-vulkan",
+        "SenseVoice Vulkan GPU 运行时",
+        "AIRsLight/VRChatVoiceInput-Runtimes",
+        "677c2591e0b55d58842f0f52c9c82650a031086d",
+        "runtimes/sensevoice-vulkan/llama-funasr-sensevoice.exe",
+        "runtimes/sensevoice-vulkan/llama-funasr-sensevoice.exe",
+        75919360,
+        "213ba9ffec2c1888b1bd2b579353691a53bd97e0f7269e2729a1143a3a698f7d");
 
     private static readonly SenseVoiceAsset Q8 = new(
         "q8_0",
@@ -350,6 +397,6 @@ internal static class SenseVoiceAssetCatalog
 
     public static IReadOnlyList<SenseVoiceAsset> ResolveBundle(string modelVariant) =>
         string.Equals(modelVariant, "q5_0", StringComparison.OrdinalIgnoreCase)
-            ? [CpuRuntime, Q5, Vad]
-            : [CpuRuntime, Q8, Vad];
+            ? [CpuRuntime, VulkanRuntime, Q5, Vad]
+            : [CpuRuntime, VulkanRuntime, Q8, Vad];
 }

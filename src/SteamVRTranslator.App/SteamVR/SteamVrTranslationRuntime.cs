@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using SteamVRTranslator.App.Configuration;
 using SteamVRTranslator.App.Diagnostics;
 using SteamVRTranslator.App.Interaction;
+using SteamVRTranslator.App.Localization;
 using SteamVRTranslator.App.Output;
 using SteamVRTranslator.App.Speech;
 using SteamVRTranslator.App.Translation;
@@ -33,35 +34,56 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
     private const string RightPointerClickActionPath = "/actions/results/in/right_pointer_click";
     private const string VoiceInputPttActionPath = "/actions/voiceinput/in/ptt";
     private const int VoiceInputReleaseDebounceMilliseconds = 60;
+    private const string OverlayCommandButtonSource = "截图工具栏录音按钮";
     private const string SelectionOverlayKey = "io.steamvrtranslator.selection";
     private const float InstructionPlaneDistance = 1.0f;
     private const float ResultPlaneDistance = 0.6f;
     private const float InstructionPlaneWidth = 1.1f;
+    private const float VideoLayerOffset = -0.0002f;
+    private const float ChromeLayerOffset = 0.0004f;
+    private const float ProgressLayerOffset = 0.0008f;
+    private const float PointerLayerOffset = 0.0012f;
     private const int ReconnectDelayMilliseconds = 2000;
+    private const int RuntimeProbeDelayMilliseconds = 500;
+    private const int RuntimeFramesPerSecond = 120;
+    private const int DirectPixelRuntimeFramesPerSecond = 180;
+    private static readonly TimeSpan WpfFrameIntervalTolerance = TimeSpan.FromMilliseconds(2);
+    internal static readonly TimeSpan SingleOverlayCloseHoldDuration = TimeSpan.FromSeconds(2d / 3d);
+    private static readonly TimeSpan ControlPanelHoldDuration = TimeSpan.FromMilliseconds(650);
+
+    internal const EVRApplicationType OpenVrApplicationType =
+        EVRApplicationType.VRApplication_Background;
 
     private readonly AppConfiguration _configuration;
     private readonly AppLog _log;
     private readonly TranslationPipeline _pipeline;
+    private readonly Lazy<HtmlResultRenderer> _htmlResultRenderer;
     private readonly OverlayRenderer _renderer = new();
     private readonly SelectionStateMachine _selection;
     private readonly List<InteractiveOverlay> _interactiveOverlays = [];
     private readonly ConcurrentQueue<ResultProgressUpdate> _resultUpdates = new();
     private readonly ConcurrentQueue<CommandButtonEvent> _commandButtonEvents = new();
     private readonly ConcurrentQueue<WpfOverlayCommand> _wpfOverlayCommands = new();
+    private readonly ConcurrentQueue<DiagnosticWpfPointerCommand> _diagnosticWpfPointerCommands = new();
+    private readonly ConcurrentQueue<DiagnosticWpfInteractionCommand> _diagnosticWpfInteractionCommands = new();
+    private readonly ConcurrentQueue<DiagnosticResultOverlayCommand> _diagnosticResultOverlayCommands = new();
+    private readonly HashSet<long> _diagnosticPressedOverlayIds = [];
+    private readonly Dictionary<long, List<PendingDiagnosticWpfInteraction>> _pendingDiagnosticWpfInteractions = [];
+    private readonly ConcurrentQueue<VrControlPanelState> _controlPanelSettings = new();
+    private readonly ConcurrentQueue<VrControlPanelAction> _controlPanelActions = new();
+    private readonly Dictionary<long, ActiveSubmission> _submissions = [];
     private readonly object _lifecycleSync = new();
     private readonly WasapiCommandRecorder _commandRecorder;
     private readonly WasapiCommandRecorder _voiceInputRecorder;
-    private readonly VrChatOscOutput? _vrChatOscOutput;
+    private VrChatOscOutput? _vrChatOscOutput;
     private readonly CommandPressTracker _commandPress;
+    private bool _invertResultScroll;
+    private int _pointerSmoothingStrength;
     private CancellationTokenSource? _cancellation;
     private Task? _loopTask;
     private Task<CapturedFrame>? _captureTask;
-    private Task<TranslationResult>? _submissionTask;
-    private long? _activeSubmissionRequestId;
-    private long? _activeOperationId;
+    private long? _activeCaptureOperationId;
     private long _nextOperationId;
-    private Stopwatch? _submissionStopwatch;
-    private int _resultUpdateSequence;
     private SelectionSnapshot? _lastRenderedSnapshot;
     private DateTimeOffset _lastRenderAt;
     private DateTimeOffset _lastResultScrollAt;
@@ -74,30 +96,50 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
     private bool _interactiveOverlaysSuppressed;
     private bool _spatialOverlaysVisible = true;
     private long _nextOverlayId;
+    private long _nextDiagnosticInputRequestId;
     private long? _interactionTargetOverlayId;
     private ETrackedControllerRole? _interactionContactHand;
+    private readonly HashSet<long> _contactOverlayIds = [];
     private long? _commandTargetOverlayId;
-    private long? _activeResultOverlayId;
-    private OverlayGrab? _grab;
+    private long? _toolbarCommandPressOverlayId;
+    private readonly OverlayGrabState _grabs = new();
+    private readonly OverlayPointerStabilizer _pointerStabilizer = new();
+    private readonly OverlayPointerRayStabilizer _pointerRayStabilizer = new();
+    private readonly OverlayCloseHoldTracker _overlayCloseHold = new(SingleOverlayCloseHoldDuration);
     private OverlayPointerCapture? _pointerCapture;
-    private bool _lastSelectionOrientationUsable = true;
+    private bool _lastSelectionPlaneUsable = true;
     private bool _openVrInitialized;
     private bool _connected;
     private bool _lastTogglePressed;
+    private DateTimeOffset? _idleTogglePressedAt;
+    private bool _idleToggleLongHoldActivated;
     private bool _lastResultClickPressed;
+    private bool _suppressResultClickRelease;
     private bool _lastLeftGripPressed;
     private bool _lastRightGripPressed;
     private bool _lastLeftPointerPressed;
     private bool _lastRightPointerPressed;
     private bool _voiceInputPressed;
     private bool _voiceInputWasPhysicallyPressed;
+    private bool _vrVoiceInputPressed;
+    private bool _desktopVoiceInputPressed;
+    private readonly object _voiceInputSync = new();
     private long? _voiceInputReleaseCandidateAt;
     private Task? _voiceInputTask;
+    private Task? _toolbarOscTask;
+    private Task? _controlPanelTask;
+    private long? _controlPanelOverlayId;
+    private VrControlPanelWindow? _controlPanelWindow;
+    private VrAndroidMirrorControlState _androidMirrorControlState = VrAndroidMirrorControlState.Empty;
+    private VrSubtitleControlState _subtitleControlState = VrSubtitleControlState.Empty;
+    private int _currentSceneProcessId;
     private int _openBindingsRequested;
     private Exception? _commandRecordingError;
     private AssistantRequestMode _pendingSubmissionMode = AssistantRequestMode.Translate;
     private Task<SenseVoiceCommandTranscriber>? _speechWarmupTask;
     private string? _lastConnectionError;
+    private string? _lastPassiveWaitStatus;
+    private bool _waitForSteamVrShutdown;
     private ulong _selectionOverlayHandle = OpenVR.k_ulOverlayHandleInvalid;
     private ulong _globalActionSetHandle = OpenVR.k_ulInvalidActionSetHandle;
     private ulong _selectionActionSetHandle = OpenVR.k_ulInvalidActionSetHandle;
@@ -124,6 +166,9 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         _configuration = configuration;
         _log = log;
         _pipeline = new TranslationPipeline(configuration, log);
+        _htmlResultRenderer = new Lazy<HtmlResultRenderer>(
+            () => new HtmlResultRenderer(log),
+            LazyThreadSafetyMode.ExecutionAndPublication);
         _selection = new SelectionStateMachine(TimeSpan.FromSeconds(configuration.SelectionTimeoutSeconds));
         _commandRecorder = new WasapiCommandRecorder(configuration.Speech, log);
         _voiceInputRecorder = new WasapiCommandRecorder(configuration.Speech, log);
@@ -133,9 +178,53 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         }
         _commandPress = new CommandPressTracker(
             TimeSpan.FromMilliseconds(configuration.Speech.HoldThresholdMilliseconds));
+        _invertResultScroll = configuration.InvertResultScroll;
+        _pointerSmoothingStrength = AppConfiguration.NormalizePointerSmoothingStrength(
+            configuration.PointerSmoothingStrength);
+        _androidMirrorControlState = VrAndroidMirrorControlState.Empty with
+        {
+            DeviceSerial = configuration.AndroidMirror.DeviceSerial,
+            MaximumSize = AndroidMirrorConfiguration.NormalizeMaximumSize(
+                configuration.AndroidMirror.MaximumSize),
+            MaximumFramesPerSecond =
+                AndroidMirrorConfiguration.NormalizeMaximumFramesPerSecond(
+                    configuration.AndroidMirror.MaximumFramesPerSecond),
+            VideoBitRateMbps = configuration.AndroidMirror.VideoBitRateMbps,
+            WindowScale = AndroidMirrorConfiguration.WindowScaleFromWidth(
+                configuration.AndroidMirror.WindowWidthMeters)
+        };
+        _subtitleControlState = new VrSubtitleControlState(
+            configuration.Subtitles.AsrBackend,
+            configuration.Subtitles.ShowOriginalText,
+            configuration.Subtitles.TranslateText,
+            configuration.Subtitles.TargetLanguage,
+            configuration.Subtitles.UseSpeakerColors,
+            configuration.Subtitles.Diarization.Enabled,
+            configuration.Subtitles.Diarization.CpuThreadCount,
+            false,
+            false,
+            string.Empty);
     }
 
     public event EventHandler<SteamVrRuntimeEventArgs>? StatusChanged;
+
+    public event EventHandler<VrControlPanelStateChangedEventArgs>? ControlPanelStateChanged;
+
+    public event EventHandler? SubtitlePanelRequested;
+
+    public event EventHandler<VrSubtitleControlRequestEventArgs>? SubtitleControlRequested;
+
+    public event EventHandler<VrAndroidMirrorControlRequestEventArgs>? AndroidMirrorControlRequested;
+
+    internal event EventHandler<WpfOverlayFrameRenderedEventArgs>? WpfOverlayFrameRendered;
+
+    internal event EventHandler<ResultOverlayFrameRenderedEventArgs>? ResultOverlayFrameRendered;
+
+    internal event EventHandler<DiagnosticRuntimeFrameCompletedEventArgs>? DiagnosticRuntimeFrameCompleted;
+
+    internal event EventHandler<DiagnosticWpfPointerProcessedEventArgs>? DiagnosticWpfPointerProcessed;
+
+    internal event EventHandler<DiagnosticWpfInteractionCompletedEventArgs>? DiagnosticWpfInteractionCompleted;
 
     public bool IsRunning
     {
@@ -148,7 +237,14 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         }
     }
 
-    public Task StartAsync()
+    public uint CurrentSceneProcessId =>
+        unchecked((uint)Math.Max(0, Volatile.Read(ref _currentSceneProcessId)));
+
+    public Task StartAsync() => StartAsyncCore(startSpeechWarmup: true);
+
+    internal Task StartAsyncForDiagnostics() => StartAsyncCore(startSpeechWarmup: false);
+
+    private Task StartAsyncCore(bool startSpeechWarmup)
     {
         lock (_lifecycleSync)
         {
@@ -159,19 +255,311 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
 
             _cancellation = new CancellationTokenSource();
             _loopTask = Task.Run(() => RunAsync(_cancellation.Token));
-            StartSpeechWarmup();
+            if (startSpeechWarmup)
+            {
+                StartSpeechWarmup();
+            }
         }
 
         _log.Info(
             $"[startup] SteamVR 运行循环已创建：PID={Environment.ProcessId}，" +
             $"捕获眼睛={_configuration.StereoCompositionMode}，" +
             $"结果滚动反转={_configuration.InvertResultScroll}，" +
+            $"交互射线={_configuration.ShowPointerRay}，" +
+            $"光标防抖={_pointerSmoothingStrength}%，" +
             $"按住阈值={_configuration.Speech.HoldThresholdMilliseconds} ms，" +
             $"录音范围={_configuration.Speech.MinimumDurationMilliseconds} ms-" +
             $"{_configuration.Speech.MaximumDurationSeconds} s，" +
+            $"OSC分段间隔={_configuration.VrChatVoiceInput.StreamingChunkIntervalMilliseconds} ms，" +
+            $"SenseVoice={_configuration.Speech.SenseVoiceBackend}/" +
+            $"{_configuration.Speech.SenseVoiceVulkanDeviceIndex?.ToString() ?? "CPU"}，" +
             $"翻译Provider={_configuration.Translation.GetActiveProvider()?.DisplayName ?? "<缺失>"}");
-        Publish("正在连接 SteamVR...", _selection.Snapshot.State);
+        Publish(L("Runtime.Listening"), _selection.Snapshot.State);
         return Task.CompletedTask;
+    }
+
+    public void ApplyLiveSettings(
+        string stereoCompositionMode,
+        bool invertResultScroll,
+        TranslationConfiguration translationConfiguration,
+        string customCommandSystemPrompt,
+        string customCommandPrompt)
+    {
+        if (stereoCompositionMode is not ("left-eye" or "right-eye"))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(stereoCompositionMode),
+                stereoCompositionMode,
+                "捕获眼睛必须为 left-eye 或 right-eye。");
+        }
+
+        ArgumentNullException.ThrowIfNull(translationConfiguration);
+        _pipeline.ApplyLiveSettings(
+            stereoCompositionMode,
+            translationConfiguration,
+            customCommandSystemPrompt,
+            customCommandPrompt);
+        Volatile.Write(ref _invertResultScroll, invertResultScroll);
+        _configuration.StereoCompositionMode = stereoCompositionMode;
+        _configuration.InvertResultScroll = invertResultScroll;
+        _configuration.Translation = translationConfiguration;
+        _configuration.Speech.CustomCommandSystemPrompt = customCommandSystemPrompt;
+        _configuration.Speech.CustomCommandPrompt = customCommandPrompt;
+        _log.Info(
+            $"[configuration] 运行时设置已更新：捕获眼睛={stereoCompositionMode}，" +
+            $"滚动反转={invertResultScroll}，" +
+            $"Provider={translationConfiguration.GetActiveProvider()?.DisplayName ?? "<缺失>"}，" +
+            $"最大并发={translationConfiguration.GetActiveProvider()?.MaxConcurrency}，" +
+            $"目标语言={translationConfiguration.TargetLanguage}。");
+    }
+
+    public void ApplyOscStreamingChunkInterval(int milliseconds)
+    {
+        if (milliseconds is
+            < VrChatVoiceInputConfiguration.MinimumStreamingChunkIntervalMilliseconds or
+            > VrChatVoiceInputConfiguration.MaximumStreamingChunkIntervalMilliseconds)
+        {
+            throw new ArgumentOutOfRangeException(nameof(milliseconds));
+        }
+
+        _configuration.VrChatVoiceInput.StreamingChunkIntervalMilliseconds = milliseconds;
+        _vrChatOscOutput?.UpdateStreamingChunkInterval(milliseconds);
+        _log.Info($"[configuration] OSC 超长文本分段间隔已热更新：{milliseconds} ms。");
+    }
+
+    public void ApplyPointerRaySetting(bool enabled)
+    {
+        _configuration.ShowPointerRay = enabled;
+        _log.Info($"[configuration] 交互射线已热更新：启用={enabled}。");
+    }
+
+    public void ApplyPointerSmoothingStrength(int strength)
+    {
+        var normalized = AppConfiguration.NormalizePointerSmoothingStrength(strength);
+        Volatile.Write(ref _pointerSmoothingStrength, normalized);
+        _configuration.PointerSmoothingStrength = normalized;
+        _pointerStabilizer.Reset();
+        _pointerRayStabilizer.Reset();
+        _log.Info($"[configuration] 光标防抖已热更新：强度={normalized}%。");
+    }
+
+    private VrControlPanelState CurrentControlPanelState() => new(
+        _configuration.VrChatVoiceInput.Enabled,
+        _configuration.VrChatVoiceInput.TranslationEnabled,
+        _configuration.VrChatVoiceInput.SendImmediately,
+        _configuration.VrChatVoiceInput.TranslationDisplayMode,
+        _configuration.VrChatVoiceInput.TranslationTargetLanguage,
+        _configuration.VrChatVoiceInput.StreamingChunkIntervalMilliseconds,
+        _configuration.StereoCompositionMode,
+        _androidMirrorControlState,
+        _configuration.Subtitles.Enabled,
+        _configuration.AndroidMirror.Enabled,
+        _configuration.ShowPointerRay,
+        Volatile.Read(ref _pointerSmoothingStrength),
+        _subtitleControlState);
+
+    public void UpdateExperimentalFeatureAvailability(
+        bool subtitlesAvailable,
+        bool androidMirrorAvailable)
+    {
+        _configuration.Subtitles.Enabled = subtitlesAvailable;
+        _configuration.AndroidMirror.Enabled = androidMirrorAvailable;
+        var window = _controlPanelWindow;
+        if (window is not null)
+        {
+            var state = CurrentControlPanelState();
+            _ = window.Dispatcher.BeginInvoke(() => window.ApplyState(state));
+        }
+    }
+
+    public void UpdateAndroidMirrorControlState(VrAndroidMirrorControlState state)
+    {
+        _androidMirrorControlState = state;
+        var window = _controlPanelWindow;
+        if (window is null)
+        {
+            return;
+        }
+
+        _ = window.Dispatcher.BeginInvoke(() => window.ApplyAndroidMirrorState(state));
+    }
+
+    public void UpdateSubtitleControlState(VrSubtitleControlState state)
+    {
+        _subtitleControlState = state;
+        var window = _controlPanelWindow;
+        if (window is null)
+        {
+            return;
+        }
+
+        _ = window.Dispatcher.BeginInvoke(() => window.ApplySubtitleState(state));
+    }
+
+    private async Task ToggleControlPanelAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (_controlPanelOverlayId is { } existingOverlayId)
+            {
+                await CloseWindowAsync(existingOverlayId, cancellationToken);
+                _controlPanelOverlayId = null;
+                _controlPanelWindow = null;
+                Publish(L("VrPanel.Closed"), SelectionState.Idle);
+                return;
+            }
+
+            var window = await Application.Current.Dispatcher.InvokeAsync(() =>
+            {
+                var created = new VrControlPanelWindow(CurrentControlPanelState())
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual,
+                    Left = -32000,
+                    Top = -32000
+                };
+                created.Show();
+                return created;
+            });
+            window.SettingsChanged += (_, args) => _controlPanelSettings.Enqueue(args.State);
+            window.CaptureRequested += (_, _) =>
+                _controlPanelActions.Enqueue(VrControlPanelAction.StartCapture);
+            window.SubtitleRequested += (_, args) =>
+                SubtitleControlRequested?.Invoke(this, args);
+            window.AndroidMirrorRequested += (_, args) =>
+                AndroidMirrorControlRequested?.Invoke(this, args);
+            window.CloseRequested += (_, _) => _ = CloseControlPanelAsync();
+            long overlayId;
+            try
+            {
+                overlayId = await ShowWindowAsync(
+                    window,
+                    new WpfSpatialOverlayOptions
+                    {
+                        Name = "SteamVR Translator Control Panel",
+                        WidthMeters = 0.25f,
+                        DistanceMeters = 0.72f,
+                        Placement = WpfSpatialOverlayPlacement.LeftHand,
+                        CanGrab = true,
+                        ShowToolbarWhenGrabbed = false,
+                        CloseWindowOnOverlayRemoval = true,
+                        MaximumFramesPerSecond = 60
+                    },
+                    cancellationToken);
+            }
+            catch
+            {
+                await Application.Current.Dispatcher.InvokeAsync(window.Close);
+                throw;
+            }
+            _controlPanelWindow = window;
+            _controlPanelOverlayId = overlayId;
+            Publish(L("VrPanel.Opened"), SelectionState.Idle);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            _log.Error("[control-panel] 打开或关闭 VR 控制面板失败。", exception);
+            Publish(LF("VrPanel.Failed", exception.Message), SelectionState.Idle, true);
+        }
+    }
+
+    private async Task CloseControlPanelAsync()
+    {
+        if (_controlPanelOverlayId is not { } overlayId)
+        {
+            return;
+        }
+
+        try
+        {
+            await CloseWindowAsync(overlayId);
+        }
+        finally
+        {
+            _controlPanelOverlayId = null;
+            _controlPanelWindow = null;
+        }
+    }
+
+    private void DrainControlPanelSettings()
+    {
+        VrControlPanelState? latest = null;
+        while (_controlPanelSettings.TryDequeue(out var state))
+        {
+            latest = state;
+        }
+
+        if (latest is not { } value)
+        {
+            return;
+        }
+
+        var voice = _configuration.VrChatVoiceInput;
+        var wasVoiceEnabled = voice.Enabled;
+        voice.Enabled = value.VoiceEnabled;
+        voice.TranslationEnabled = value.TranslationEnabled;
+        voice.SendImmediately = value.SendImmediately;
+        voice.TranslationDisplayMode = VoiceTranslationDisplayModes.Normalize(value.DisplayMode);
+        voice.TranslationTargetLanguage = value.TargetLanguage;
+        ApplyPointerRaySetting(value.PointerRayEnabled);
+        ApplyPointerSmoothingStrength(value.PointerSmoothingStrength);
+        ApplyOscStreamingChunkInterval(value.ChunkIntervalMilliseconds);
+        ApplyLiveSettings(
+            value.CaptureEye,
+            _invertResultScroll,
+            _configuration.Translation,
+            _configuration.Speech.CustomCommandSystemPrompt,
+            _configuration.Speech.CustomCommandPrompt);
+        if (voice.Enabled && _vrChatOscOutput is null)
+        {
+            _vrChatOscOutput = new VrChatOscOutput(voice);
+        }
+        if (wasVoiceEnabled && !voice.Enabled && _voiceInputPressed)
+        {
+            _voiceInputPressed = false;
+            _voiceInputWasPhysicallyPressed = false;
+            _voiceInputReleaseCandidateAt = null;
+            _ = _voiceInputRecorder.CancelAsync(CancellationToken.None);
+            _ = SetVrChatTypingSafeAsync(false, CancellationToken.None);
+        }
+
+        var applied = CurrentControlPanelState();
+        _log.Info(
+            $"[control-panel] VRChat 语音设置已热更新：启用={applied.VoiceEnabled}，" +
+            $"翻译={applied.TranslationEnabled}，立即发送={applied.SendImmediately}，" +
+            $"显示={applied.DisplayMode}，目标语言={applied.TargetLanguage}，" +
+            $"分段间隔={applied.ChunkIntervalMilliseconds} ms，" +
+            $"捕获眼睛={applied.CaptureEye}，交互射线={applied.PointerRayEnabled}，" +
+            $"防抖={applied.PointerSmoothingStrength}%。");
+        ControlPanelStateChanged?.Invoke(
+            this,
+            new VrControlPanelStateChangedEventArgs(applied));
+    }
+
+    private void DrainControlPanelActions(CancellationToken cancellationToken)
+    {
+        while (_controlPanelActions.TryDequeue(out var action))
+        {
+            switch (action)
+            {
+                case VrControlPanelAction.StartCapture:
+                    if (_selection.Snapshot.State == SelectionState.Idle)
+                    {
+                        _log.Info("[control-panel] 请求开始空间框选。");
+                        HandleTransition(_selection.Toggle(DateTimeOffset.Now), cancellationToken);
+                    }
+                    break;
+                case VrControlPanelAction.OpenSubtitles:
+                    if (_configuration.Subtitles.Enabled)
+                    {
+                        _log.Info("[control-panel] 请求打开实时字幕窗口。");
+                        SubtitlePanelRequested?.Invoke(this, EventArgs.Empty);
+                    }
+                    break;
+            }
+        }
     }
 
     public async Task StopAsync()
@@ -202,8 +590,9 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         }
 
         CancelPendingWpfOverlayCommands();
+        CancelPendingDiagnosticResultOverlayCommands();
 
-        Publish("已停止", SelectionState.Idle);
+        Publish(L("Runtime.Stopped"), SelectionState.Idle);
     }
 
     public void RequestToggle(string source = "外部请求")
@@ -220,6 +609,30 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
     public void RequestButtonUp(string source)
     {
         _commandButtonEvents.Enqueue(new CommandButtonEvent(CommandButtonEventKind.Up, source));
+    }
+
+    public void SetDesktopVoiceInputPressed(bool pressed)
+    {
+        if (!_configuration.VrChatVoiceInput.Enabled)
+        {
+            return;
+        }
+
+        var cancellationToken = _cancellation?.Token ?? CancellationToken.None;
+        lock (_voiceInputSync)
+        {
+            if (_desktopVoiceInputPressed == pressed)
+            {
+                return;
+            }
+            _desktopVoiceInputPressed = pressed;
+            UpdateCombinedVrChatVoiceInput(cancellationToken);
+        }
+
+        if (!pressed)
+        {
+            _ = CompleteDesktopVoiceReleaseAfterDebounceAsync();
+        }
     }
 
     public void RequestOpenBindings()
@@ -277,6 +690,219 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         }
     }
 
+    public void ResizeWindow(long overlayId, float widthMeters)
+    {
+        if (IsRunning)
+        {
+            _wpfOverlayCommands.Enqueue(new ResizeWpfOverlayCommand(
+                overlayId,
+                Math.Clamp(widthMeters, 0.06f, 2.5f)));
+        }
+    }
+
+    internal long MoveWindowPointerForDiagnostics(
+        long overlayId,
+        NormalizedPoint texturePoint,
+        bool isPressed,
+        bool dispatchInput = false)
+    {
+        if (!IsRunning)
+        {
+            return 0;
+        }
+
+        var requestId = Interlocked.Increment(ref _nextDiagnosticInputRequestId);
+        _diagnosticWpfPointerCommands.Enqueue(
+            new DiagnosticWpfPointerCommand(
+                requestId,
+                overlayId,
+                texturePoint.Clamp(),
+                isPressed,
+                dispatchInput,
+                false,
+                false,
+                Stopwatch.GetTimestamp()));
+        return requestId;
+    }
+
+    internal long MoveWindowPointerThroughOpenVrForDiagnostics(
+        long overlayId,
+        NormalizedPoint targetTexturePoint,
+        bool isPressed = false,
+        bool dispatchInput = false)
+    {
+        if (!IsRunning)
+        {
+            return 0;
+        }
+
+        var requestId = Interlocked.Increment(ref _nextDiagnosticInputRequestId);
+        _diagnosticWpfPointerCommands.Enqueue(
+            new DiagnosticWpfPointerCommand(
+                requestId,
+                overlayId,
+                targetTexturePoint,
+                isPressed,
+                dispatchInput,
+                true,
+                false,
+                Stopwatch.GetTimestamp()));
+        return requestId;
+    }
+
+    internal long LeaveWindowPointerForDiagnostics(long overlayId)
+    {
+        if (!IsRunning)
+        {
+            return 0;
+        }
+
+        var requestId = Interlocked.Increment(ref _nextDiagnosticInputRequestId);
+        _diagnosticWpfPointerCommands.Enqueue(
+            new DiagnosticWpfPointerCommand(
+                requestId,
+                overlayId,
+                default,
+                false,
+                false,
+                false,
+                true,
+                Stopwatch.GetTimestamp()));
+        return requestId;
+    }
+
+    internal long ClickWindowControlForDiagnostics(long overlayId, string controlName)
+    {
+        if (!IsRunning || string.IsNullOrWhiteSpace(controlName))
+        {
+            return 0;
+        }
+
+        var requestId = Interlocked.Increment(ref _nextDiagnosticInputRequestId);
+        _diagnosticWpfInteractionCommands.Enqueue(
+            new DiagnosticWpfInteractionCommand(
+                requestId,
+                overlayId,
+                DiagnosticWpfInteractionKind.Click,
+                controlName.Trim(),
+                new NormalizedPoint(0.5f, 0.5f),
+                0,
+                Stopwatch.GetTimestamp()));
+        return requestId;
+    }
+
+    internal long ScrollWindowForDiagnostics(
+        long overlayId,
+        NormalizedPoint texturePoint,
+        int wheelDelta)
+    {
+        if (!IsRunning || wheelDelta == 0)
+        {
+            return 0;
+        }
+
+        var requestId = Interlocked.Increment(ref _nextDiagnosticInputRequestId);
+        _diagnosticWpfInteractionCommands.Enqueue(
+            new DiagnosticWpfInteractionCommand(
+                requestId,
+                overlayId,
+                DiagnosticWpfInteractionKind.Scroll,
+                null,
+                texturePoint.Clamp(),
+                wheelDelta,
+                Stopwatch.GetTimestamp()));
+        return requestId;
+    }
+
+    internal Task<long> ShowMarkdownResultForDiagnostics(
+        string markdown,
+        CancellationToken cancellationToken = default)
+    {
+        if (!IsRunning)
+        {
+            return Task.FromException<long>(
+                new InvalidOperationException("SteamVR 服务尚未启动。"));
+        }
+        if (string.IsNullOrWhiteSpace(markdown))
+        {
+            return Task.FromException<long>(
+                new ArgumentException("Markdown 内容不能为空。", nameof(markdown)));
+        }
+
+        var completion = new TaskCompletionSource<long>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        _diagnosticResultOverlayCommands.Enqueue(
+            new ShowDiagnosticMarkdownOverlayCommand(markdown, completion));
+        return cancellationToken.CanBeCanceled
+            ? completion.Task.WaitAsync(cancellationToken)
+            : completion.Task;
+    }
+
+    internal Task<long> ShowChatResultForDiagnostics(
+        AssistantConversationView chat,
+        CancellationToken cancellationToken = default)
+    {
+        if (!IsRunning)
+        {
+            return Task.FromException<long>(
+                new InvalidOperationException("SteamVR 服务尚未启动。"));
+        }
+
+        var completion = new TaskCompletionSource<long>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        _diagnosticResultOverlayCommands.Enqueue(
+            new ShowDiagnosticChatOverlayCommand(chat, completion));
+        return cancellationToken.CanBeCanceled
+            ? completion.Task.WaitAsync(cancellationToken)
+            : completion.Task;
+    }
+
+    internal long UpdateChatResultForDiagnostics(
+        long overlayId,
+        AssistantConversationView chat)
+    {
+        if (!IsRunning)
+        {
+            return 0;
+        }
+
+        var commandId = Interlocked.Increment(ref _nextDiagnosticInputRequestId);
+        _diagnosticResultOverlayCommands.Enqueue(
+            new UpdateDiagnosticChatOverlayCommand(commandId, overlayId, chat));
+        return commandId;
+    }
+
+    internal long ScrollResultForDiagnostics(long overlayId, double delta)
+    {
+        if (!IsRunning || Math.Abs(delta) < 0.1)
+        {
+            return 0;
+        }
+
+        var requestId = Interlocked.Increment(ref _nextDiagnosticInputRequestId);
+        _diagnosticResultOverlayCommands.Enqueue(
+            new ScrollDiagnosticResultOverlayCommand(requestId, overlayId, delta));
+        return requestId;
+    }
+
+    internal Task<bool> CloseOverlayForDiagnostics(
+        long overlayId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!IsRunning)
+        {
+            return Task.FromResult(false);
+        }
+
+        var completion = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        _diagnosticResultOverlayCommands.Enqueue(
+            new CloseDiagnosticResultOverlayCommand(overlayId, completion));
+        return cancellationToken.CanBeCanceled
+            ? completion.Task.WaitAsync(cancellationToken)
+            : completion.Task;
+    }
+
     public async ValueTask DisposeAsync()
     {
         await StopAsync();
@@ -289,6 +915,10 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             catch (OperationCanceledException)
             {
             }
+        }
+        if (_toolbarOscTask is not null)
+        {
+            await _toolbarOscTask;
         }
         _commandRecorder.Dispose();
         _voiceInputRecorder.Dispose();
@@ -310,20 +940,53 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             {
             }
         }
+        if (_htmlResultRenderer.IsValueCreated)
+        {
+            await _htmlResultRenderer.Value.DisposeAsync();
+        }
         _pipeline.Dispose();
     }
 
     private async Task RunAsync(CancellationToken cancellationToken)
     {
+        var timerFramesPerSecond = RuntimeFramesPerSecond;
+        var frameTimer = CreateRuntimeFrameTimer(timerFramesPerSecond);
         try
         {
             while (!cancellationToken.IsCancellationRequested)
             {
                 if (!_connected)
                 {
+                    var runtimeProcesses = SteamVrRuntimeProcessProbe.Capture();
+                    if (_waitForSteamVrShutdown)
+                    {
+                        if (runtimeProcesses.AnyRunning)
+                        {
+                            PublishPassiveWait(L("Runtime.WaitShutdown"));
+                            await Task.Delay(RuntimeProbeDelayMilliseconds, cancellationToken);
+                            continue;
+                        }
+
+                        _waitForSteamVrShutdown = false;
+                    }
+
+                    if (!runtimeProcesses.IsReady)
+                    {
+                        PublishPassiveWait(L("Runtime.WaitForSteamVr"));
+                        await Task.Delay(RuntimeProbeDelayMilliseconds, cancellationToken);
+                        continue;
+                    }
+
                     try
                     {
-                        InitializeOpenVr();
+                        if (!InitializeOpenVr())
+                        {
+                            PublishPassiveWait(L("Runtime.WaitForReady"));
+                            await Task.Delay(RuntimeProbeDelayMilliseconds, cancellationToken);
+                            continue;
+                        }
+
+                        _lastPassiveWaitStatus = null;
                         _lastConnectionError = null;
                     }
                     catch (Exception exception)
@@ -333,7 +996,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                         {
                             _lastConnectionError = exception.Message;
                             _log.Error("SteamVR 连接失败。程序将继续等待运行时。", exception);
-                            Publish($"SteamVR 未连接：{exception.Message}", SelectionState.Idle, true);
+                            Publish(LF("Runtime.ConnectionFailed", exception.Message), SelectionState.Idle, true);
                         }
 
                         await Task.Delay(ReconnectDelayMilliseconds, cancellationToken);
@@ -343,22 +1006,52 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
 
                 try
                 {
+                    var diagnosticFrameStartedAt = DiagnosticRuntimeFrameCompleted is null
+                        ? 0
+                        : Stopwatch.GetTimestamp();
                     if (ConsumeRuntimeQuitEvent())
                     {
                         _selection.Cancel(DateTimeOffset.Now);
+                        _waitForSteamVrShutdown = true;
                         ShutdownOpenVr();
-                        Publish("SteamVR 已退出，正在等待重新启动...", SelectionState.Idle, true);
-                        await Task.Delay(ReconnectDelayMilliseconds, cancellationToken);
+                        PublishPassiveWait(L("Runtime.WaitShutdown"));
+                        await Task.Delay(RuntimeProbeDelayMilliseconds, cancellationToken);
                         continue;
                     }
 
                     DrainWpfOverlayCommands();
+                    DrainDiagnosticResultOverlayCommands();
+                    DrainControlPanelSettings();
+                    DrainControlPanelActions(cancellationToken);
                     PollFrame(cancellationToken);
+                    DrainDiagnosticWpfPointerCommands();
+                    DrainDiagnosticWpfInteractionCommands();
                     await CompleteCaptureIfReadyAsync();
-                    await CompleteSubmissionIfReadyAsync();
+                    await CompleteSubmissionsIfReadyAsync();
                     DrainResultUpdates();
                     RenderInteractiveOverlays();
-                    await Task.Delay(16, cancellationToken);
+                    if (diagnosticFrameStartedAt != 0)
+                    {
+                        var completedAt = Stopwatch.GetTimestamp();
+                        DiagnosticRuntimeFrameCompleted?.Invoke(
+                            this,
+                            new DiagnosticRuntimeFrameCompletedEventArgs(
+                                completedAt,
+                                Stopwatch.GetElapsedTime(diagnosticFrameStartedAt, completedAt)));
+                    }
+                    var nextTimerFramesPerSecond = HasDirectPixelOverlay()
+                        ? DirectPixelRuntimeFramesPerSecond
+                        : RuntimeFramesPerSecond;
+                    if (nextTimerFramesPerSecond != timerFramesPerSecond)
+                    {
+                        frameTimer.Dispose();
+                        timerFramesPerSecond = nextTimerFramesPerSecond;
+                        frameTimer = CreateRuntimeFrameTimer(timerFramesPerSecond);
+                    }
+                    if (!await frameTimer.WaitForNextTickAsync(cancellationToken))
+                    {
+                        break;
+                    }
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -367,7 +1060,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                 catch (Exception exception)
                 {
                     _log.Error("SteamVR 运行循环发生错误，准备重新连接。", exception);
-                    Publish($"SteamVR 错误：{exception.Message}", _selection.Snapshot.State, true);
+                    Publish(LF("Runtime.Error", exception.Message), _selection.Snapshot.State, true);
                     _selection.Cancel(DateTimeOffset.Now);
                     ShutdownOpenVr();
                     await Task.Delay(ReconnectDelayMilliseconds, cancellationToken);
@@ -376,6 +1069,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         }
         finally
         {
+            frameTimer.Dispose();
             ShutdownOpenVr();
             if (_captureTask is not null)
             {
@@ -393,28 +1087,43 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
 
                 _captureTask = null;
             }
-            if (_submissionTask is not null)
+            foreach (var submission in _submissions.Values.ToArray())
             {
+                submission.Cancellation.Cancel();
                 try
                 {
-                    await _submissionTask;
+                    await submission.Task;
                 }
                 catch (OperationCanceledException)
                 {
                 }
                 catch (Exception exception)
                 {
-                    _log.Error("停止时等待翻译任务失败。", exception);
+                    _log.Error(
+                        $"停止时等待翻译任务失败：{DiagnosticTag(submission.OperationId, submission.RequestId)}。",
+                        exception);
                 }
-
-                _submissionTask = null;
+                finally
+                {
+                    submission.Cancellation.Dispose();
+                }
             }
+            _submissions.Clear();
         }
     }
+
+    private static PeriodicTimer CreateRuntimeFrameTimer(int framesPerSecond) =>
+        new(TimeSpan.FromSeconds(1d / framesPerSecond));
+
+    private bool HasDirectPixelOverlay() =>
+        _interactiveOverlays.Any(overlay =>
+            !overlay.IsPresentationDeferred &&
+            overlay.WindowSource?.HasDirectPixelSource == true);
 
     private void PollFrame(CancellationToken cancellationToken)
     {
         UpdateActionState();
+        UpdateCurrentSceneProcessId();
 
         var togglePressed = ReadDigital(_toggleActionHandle);
         var now = DateTimeOffset.Now;
@@ -422,7 +1131,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         {
             UpdateVrChatVoiceInput(ReadDigital(_voiceInputPttActionHandle), cancellationToken);
         }
-        UpdateOverlayInteraction();
+        UpdateOverlayInteraction(cancellationToken);
         if (togglePressed && !_lastTogglePressed)
         {
             HandleCommandButtonDown("SteamVR 左手摇杆", now, cancellationToken);
@@ -451,6 +1160,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         }
 
         UpdateCommandHold(now, cancellationToken);
+        UpdateControlPanelHold(now, cancellationToken);
 
         if (Interlocked.Exchange(ref _openBindingsRequested, 0) == 1)
         {
@@ -466,6 +1176,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         {
             var leftPressed = ReadDigital(_leftTriggerActionHandle);
             var rightPressed = ReadDigital(_rightTriggerActionHandle);
+            var planeBecameUnavailable = false;
             SpatialSelectionPlane? plane = null;
             if (TryReadSpatialPlane(out var measuredPlane))
             {
@@ -476,6 +1187,11 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                     SetSpatialOverlayTransform(measuredPlane);
                 }
             }
+            else if (leftPressed && rightPressed && _currentPlane is not null)
+            {
+                _currentPlane = null;
+                planeBecameUnavailable = true;
+            }
 
             var transition = _selection.Update(
                 leftPressed,
@@ -483,7 +1199,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                 plane?.LeftPointer,
                 plane?.RightPointer,
                 DateTimeOffset.Now,
-                plane?.HasUsableOrientation ?? false);
+                plane?.IsUsable ?? false);
             if (transition.Kind == SelectionTransitionKind.RegionLocked)
             {
                 _lockedPlane = _currentPlane;
@@ -495,12 +1211,31 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                 HandleTransition(_selection.Toggle(now), cancellationToken);
             }
             UpdateSelectionManagerHint(plane, leftPressed && rightPressed, transition.Snapshot.State);
-            RenderSelectionIfNeeded(force: transition.Kind != SelectionTransitionKind.None);
+            RenderSelectionIfNeeded(
+                force: transition.Kind != SelectionTransitionKind.None || planeBecameUnavailable);
         }
 
         UpdateResultControls();
 
         HandleTransition(_selection.Tick(now), cancellationToken);
+    }
+
+    private void UpdateCurrentSceneProcessId()
+    {
+        try
+        {
+            Volatile.Write(
+                ref _currentSceneProcessId,
+                unchecked((int)(OpenVR.Applications?.GetCurrentSceneProcessId() ?? 0)));
+        }
+        catch (Exception exception)
+        {
+            if (Volatile.Read(ref _currentSceneProcessId) != 0)
+            {
+                _log.Warning($"[subtitles] 无法读取 SteamVR 当前场景进程：{exception.Message}");
+            }
+            Volatile.Write(ref _currentSceneProcessId, 0);
+        }
     }
 
     private void HandleCommandButtonDown(
@@ -517,22 +1252,47 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             return;
         }
 
-        if (_captureTask is { IsCompleted: false } || _submissionTask is { IsCompleted: false })
+        if (_grabs.HasMultiple)
         {
-            Publish("当前仍有捕获或翻译任务正在执行。", SelectionState.Idle, true);
+            Publish(L("Interaction.MultipleNoAction"), SelectionState.Idle, true);
             return;
         }
 
-        var target = ResolveInteractionTarget(capturesOnly: true);
+        if (_captureTask is { IsCompleted: false })
+        {
+            Publish(L("Capture.InProgress"), SelectionState.Idle, true);
+            return;
+        }
+
+        var target = ResolveInteractionTarget();
         if (target is null)
         {
             if (_interactionTargetOverlayId is not null)
             {
-                Publish("左摇杆只能对截图执行翻译；请触碰截图后重试。", SelectionState.Idle, true);
+                Publish(L("Interaction.NeedCapture"), SelectionState.Idle, true);
                 return;
             }
 
-            HandleTransition(_selection.Toggle(now), cancellationToken);
+            _idleTogglePressedAt = now;
+            _idleToggleLongHoldActivated = false;
+            return;
+        }
+
+        var isCapture = target is { Kind: InteractiveOverlayKind.Capture, Capture: not null };
+        var isConversation = target is
+        {
+            Kind: InteractiveOverlayKind.Result,
+            Conversation: not null
+        };
+        if (!isCapture && !isConversation)
+        {
+            Publish(L("Interaction.NeedCaptureOrConversation"), SelectionState.Idle, true);
+            return;
+        }
+
+        if (_submissions.Values.Any(submission => submission.OverlayId == target.Id))
+        {
+            Publish(L("Request.InProgress"), SelectionState.Idle, true);
             return;
         }
 
@@ -544,21 +1304,35 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
 
         _commandPress.Press(now);
         _commandTargetOverlayId = target.Id;
-        _pendingSubmissionMode = AssistantRequestMode.Translate;
+        _pendingSubmissionMode = isConversation
+            ? AssistantRequestMode.CustomCommand
+            : AssistantRequestMode.Translate;
         _commandRecordingError = null;
         try
         {
             _commandRecorder.Start();
+            SetCommandRecording(target.Id, true);
             _log.Info(
                 $"{DiagnosticTag()} [input] 已开始暂存语音命令；" +
-                "短按松开时将丢弃录音并直接翻译。");
-            Publish("松开可直接翻译；继续按住可说出自定义命令。", SelectionState.Idle);
+                (isConversation
+                    ? "松开后将在当前结果窗口内继续追问。"
+                    : "短按松开时将丢弃录音并直接翻译。"));
+            Publish(
+                isConversation
+                    ? L("Command.HoldFollowUp")
+                    : L("Command.HoldCustom"),
+                SelectionState.Idle);
         }
         catch (Exception exception)
         {
             _commandRecordingError = exception;
             _log.Error("无法开始语音命令录音；短按翻译仍可使用。", exception);
-            Publish("麦克风不可用；短按仍可直接翻译。", SelectionState.Idle, true);
+            Publish(
+                isConversation
+                    ? L("Command.MicrophoneFollowUpUnavailable")
+                    : L("Command.MicrophoneTranslateAvailable"),
+                SelectionState.Idle,
+                true);
         }
     }
 
@@ -567,7 +1341,20 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
+        if (_idleTogglePressedAt is not null)
+        {
+            var openedPanel = _idleToggleLongHoldActivated;
+            _idleTogglePressedAt = null;
+            _idleToggleLongHoldActivated = false;
+            if (!openedPanel)
+            {
+                HandleTransition(_selection.Toggle(now), cancellationToken);
+            }
+            return;
+        }
+
         var heldDuration = _commandPress.HeldDuration(now);
+        var targetOverlayId = _commandTargetOverlayId;
         var kind = _commandPress.Release(now);
         if (kind == CommandPressKind.None)
         {
@@ -585,11 +1372,15 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             return;
         }
 
+        SetCommandRecording(targetOverlayId, false);
+
         _log.Info(
             $"{DiagnosticTag()} [input] 翻译键松开：来源={source}，" +
             $"持续={heldDuration.TotalMilliseconds:F0} ms，手势={kind}，" +
             $"长按阈值={_configuration.Speech.HoldThresholdMilliseconds} ms");
-        _pendingSubmissionMode = kind == CommandPressKind.CustomCommand
+        var isConversationFollowUp = _commandTargetOverlayId is { } targetId &&
+                                     FindOverlay(targetId)?.Conversation is not null;
+        _pendingSubmissionMode = isConversationFollowUp || kind == CommandPressKind.CustomCommand
             ? AssistantRequestMode.CustomCommand
             : AssistantRequestMode.Translate;
         StartTranslationForCommandTarget(cancellationToken);
@@ -608,10 +1399,14 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                 $"{DiagnosticTag()} [input] 已越过长按阈值：" +
                 $"持续={_commandPress.HeldDuration(now).TotalMilliseconds:F0} ms");
             PulseBoth(0.045f, 120f, 0.45f);
+            var isFollowUp = _commandTargetOverlayId is { } targetId &&
+                             FindOverlay(targetId)?.Conversation is not null;
             Publish(
                 _commandRecordingError is null
-                    ? "正在听取自定义命令；松开后识别。"
-                    : "麦克风不可用；松开后将显示详细错误。",
+                    ? isFollowUp
+                        ? L("Command.ListeningFollowUp")
+                        : L("Command.ListeningCustom")
+                    : L("Command.MicrophoneErrorOnRelease"),
                 SelectionState.Idle,
                 _commandRecordingError is not null);
         }
@@ -623,6 +1418,20 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         }
     }
 
+    private void UpdateControlPanelHold(DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        if (_idleTogglePressedAt is not { } pressedAt ||
+            _idleToggleLongHoldActivated ||
+            now - pressedAt < ControlPanelHoldDuration)
+        {
+            return;
+        }
+
+        _idleToggleLongHoldActivated = true;
+        PulseLeft(0.05f, 120f, 0.55f);
+        _controlPanelTask = ToggleControlPanelAsync(cancellationToken);
+    }
+
     private void HandleTransition(SelectionTransition transition, CancellationToken cancellationToken)
     {
         switch (transition.Kind)
@@ -630,10 +1439,10 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             case SelectionTransitionKind.None:
                 return;
             case SelectionTransitionKind.Armed:
-                _activeOperationId = Interlocked.Increment(ref _nextOperationId);
+                _activeCaptureOperationId = Interlocked.Increment(ref _nextOperationId);
                 _currentPlane = null;
                 _lockedPlane = null;
-                _lastSelectionOrientationUsable = true;
+                _lastSelectionPlaneUsable = true;
                 _interactiveOverlaysSuppressed = true;
                 HideSelectionOverlay();
                 _lastRenderedSnapshot = null;
@@ -646,7 +1455,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                 _lastRenderAt = DateTimeOffset.Now;
                 ShowSelectionOverlay();
                 PulseBoth(0.06f, 80f, 0.45f);
-                Publish("选择模式：按住双手扳机调整范围。", transition.Snapshot.State);
+                Publish(L("Selection.ArmedStatus"), transition.Snapshot.State);
                 break;
             case SelectionTransitionKind.SizingStarted:
                 _log.Info(
@@ -657,7 +1466,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                     SetSpatialOverlayTransform(sizingPlane);
                 }
                 PulseBoth(0.035f, 110f, 0.35f);
-                Publish("正在调整范围；松开任一扳机立即捕获。", transition.Snapshot.State);
+                Publish(L("Selection.SizingStatus"), transition.Snapshot.State);
                 break;
             case SelectionTransitionKind.RegionUpdated:
                 break;
@@ -673,25 +1482,41 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                 }
                 RenderSelectionIfNeeded(force: true);
                 PulseBoth(0.09f, 65f, 0.65f);
-                Publish("范围已固定，正在立即捕获画面。", transition.Snapshot.State);
+                Publish(L("Selection.LockedStatus"), transition.Snapshot.State);
                 break;
             case SelectionTransitionKind.RegionRejected:
                 ResetRejectedSelection(transition.Snapshot);
                 PulseBoth(0.08f, 35f, 0.3f);
-                Publish("选择范围过小，请重新框选。", transition.Snapshot.State, true);
+                Publish(L("Selection.TooSmall"), transition.Snapshot.State, true);
                 break;
             case SelectionTransitionKind.OrientationRejected:
                 PulseBoth(0.08f, 35f, 0.3f);
+                var rejectionMessage = L("Selection.InvalidPlane");
                 if (_currentPlane is { } rejectedPlane)
                 {
-                    _log.Warning(
-                        $"{DiagnosticTag()} [selection] 相框角度无效：" +
-                        $"视线夹角={rejectedPlane.ViewAngleDegrees:F1}°/" +
-                        $"上限={SpatialSelectionPlane.MaximumViewAngleDegrees:F0}°");
+                    if (!rejectedPlane.HasUsableDimensions)
+                    {
+                        _log.Warning(
+                            $"{DiagnosticTag()} [selection] 框选尺寸无效：" +
+                            $"当前={rejectedPlane.Width:F3}m x {rejectedPlane.Height:F3}m，" +
+                            $"最低={SpatialSelectionPlane.MinimumWidthMeters:F2}m x " +
+                            $"{SpatialSelectionPlane.MinimumHeightMeters:F2}m");
+                        rejectionMessage = LF(
+                            "Selection.MinimumSize",
+                            SpatialSelectionPlane.MinimumWidthMeters * 100);
+                    }
+                    else
+                    {
+                        _log.Warning(
+                            $"{DiagnosticTag()} [selection] 相框角度无效：" +
+                            $"视线夹角={rejectedPlane.ViewAngleDegrees:F1}°/" +
+                            $"上限={SpatialSelectionPlane.MaximumViewAngleDegrees:F0}°");
+                        rejectionMessage = L("Selection.InvalidAngle");
+                    }
                 }
 
                 ResetRejectedSelection(transition.Snapshot);
-                Publish("相框角度过大，请让相框正对当前视线。", transition.Snapshot.State, true);
+                Publish(rejectionMessage, transition.Snapshot.State, true);
                 break;
             case SelectionTransitionKind.SubmissionRequested:
                 if (_lockedPlane is not { } submittedPlane || !submittedPlane.IsUsable)
@@ -700,15 +1525,16 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                     _currentPlane = null;
                     _lockedPlane = null;
                     _selection.Complete(DateTimeOffset.Now);
+                    _activeCaptureOperationId = null;
                     RestoreInteractiveOverlays("框选平面无效");
-                    Publish("空间框选平面无效，请重新框选。", SelectionState.Idle, true);
+                    Publish(L("Selection.InvalidPlane"), SelectionState.Idle, true);
                     break;
                 }
 
                 HideSelectionOverlay();
                 _lastRenderedSnapshot = null;
-                var operationId = _activeOperationId ?? Interlocked.Increment(ref _nextOperationId);
-                _activeOperationId = operationId;
+                var operationId = _activeCaptureOperationId ?? Interlocked.Increment(ref _nextOperationId);
+                _activeCaptureOperationId = operationId;
                 _log.Info(
                     $"{DiagnosticTag(operationId, null)} [capture] 松开扳机后立即捕获：" +
                     DescribePlane(submittedPlane));
@@ -717,34 +1543,38 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                     submittedPlane,
                     cancellationToken,
                     DiagnosticTag(operationId, null));
-                Publish("正在捕获所选区域...", transition.Snapshot.State);
+                Publish(L("Selection.Capturing"), transition.Snapshot.State);
                 break;
             case SelectionTransitionKind.Cancelled:
                 _log.Info($"{DiagnosticTag()} [selection] 操作已取消。");
+                _activeCaptureOperationId = null;
                 _lastResultClickPressed = true;
                 HideSelectionOverlay();
                 _currentPlane = null;
                 _lockedPlane = null;
                 RestoreInteractiveOverlays("取消框选");
-                Publish("已取消选择。", transition.Snapshot.State);
+                Publish(L("Selection.Cancelled"), transition.Snapshot.State);
                 break;
             case SelectionTransitionKind.TimedOut:
                 _log.Warning($"{DiagnosticTag()} [selection] 操作超时。");
+                _activeCaptureOperationId = null;
                 HideSelectionOverlay();
                 _currentPlane = null;
                 _lockedPlane = null;
                 RestoreInteractiveOverlays("框选超时");
-                Publish("选择超时，已取消。", transition.Snapshot.State, true);
+                Publish(L("Selection.TimedOut"), transition.Snapshot.State, true);
                 break;
             case SelectionTransitionKind.Completed:
                 HideSelectionOverlay();
                 _currentPlane = null;
                 _lockedPlane = null;
-                _activeOperationId = null;
+                _activeCaptureOperationId = null;
                 Publish(
-                    _interactiveOverlays.Any(item => item.Kind == InteractiveOverlayKind.Capture)
-                        ? "就绪；触碰截图后按左摇杆翻译，抓握可自由移动。"
-                        : "就绪",
+                    _submissions.Count > 0
+                        ? L("Selection.ReadyWithRequests")
+                        : _interactiveOverlays.Any(item => item.Kind == InteractiveOverlayKind.Capture)
+                        ? L("Selection.ReadyWithCapture")
+                        : L("Selection.Ready"),
                     transition.Snapshot.State);
                 break;
         }
@@ -752,69 +1582,127 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
 
     private void StartTranslationForCommandTarget(CancellationToken cancellationToken)
     {
+        if (_grabs.HasMultiple)
+        {
+            CancelSingleOverlayCommand("双手同时抓取空间对象");
+            Publish(L("Translation.MultipleNoAction"), SelectionState.Idle, true);
+            return;
+        }
+
         var source = _commandTargetOverlayId is { } targetId
             ? FindOverlay(targetId)
             : null;
+        SetCommandRecording(_commandTargetOverlayId, false);
         _commandTargetOverlayId = null;
-        if (source is not { Kind: InteractiveOverlayKind.Capture, Capture: { } capture })
+        var sourceCapture = source?.Capture ?? source?.Conversation?.Capture;
+        if (source is null || sourceCapture is null)
         {
             _ = _commandRecorder.CancelAsync(CancellationToken.None);
-            Publish("目标截图已不存在，翻译已取消。", SelectionState.Idle, true);
+            Publish(L("Translation.TargetMissing"), SelectionState.Idle, true);
             return;
         }
 
-        if (_submissionTask is { IsCompleted: false })
+        if (_submissions.Values.Any(submission => submission.OverlayId == source.Id))
         {
             _ = _commandRecorder.CancelAsync(CancellationToken.None);
-            Publish("已有翻译任务正在执行。", SelectionState.Idle, true);
+            Publish(L("Request.InProgress"), SelectionState.Idle, true);
             return;
         }
 
-        var mode = _pendingSubmissionMode;
+        var mode = source.Conversation is not null
+            ? AssistantRequestMode.CustomCommand
+            : _pendingSubmissionMode;
         var operationId = Interlocked.Increment(ref _nextOperationId);
-        var resultState = new ResultOverlayState();
-        var initialStatus = mode == AssistantRequestMode.CustomCommand
-            ? "正在识别语音命令..."
-            : "正在翻译...";
-        var requestId = resultState.Begin(initialStatus);
-        var resultPlane = CreateResultPlaneInFront(source.Plane);
-        var resultOverlay = AddInteractiveOverlay(
-            InteractiveOverlayKind.Result,
-            resultPlane,
-            capture: null,
-            resultState);
-        _activeOperationId = operationId;
-        _activeSubmissionRequestId = requestId;
-        _activeResultOverlayId = resultOverlay.Id;
-        _submissionStopwatch = Stopwatch.StartNew();
-        _resultUpdateSequence = 0;
+        var conversation = source.Conversation ??
+                           (mode == AssistantRequestMode.CustomCommand
+                               ? new AssistantConversation(sourceCapture)
+                               : null);
+        var initialStatus = mode switch
+        {
+            AssistantRequestMode.CustomCommand when conversation is not null =>
+                conversation.FormatPending(null, L("Translation.RecognizingCommand")),
+            AssistantRequestMode.LayoutTranslate => L("Translation.LayoutPending"),
+            _ => L("Translation.Pending")
+        };
+        var statusMessage = mode switch
+        {
+            AssistantRequestMode.CustomCommand when source.Conversation is not null =>
+                L("Translation.RecognizingFollowUp"),
+            AssistantRequestMode.CustomCommand => L("Translation.RecognizingCommand"),
+            AssistantRequestMode.LayoutTranslate => L("Translation.LayoutPending"),
+            _ => L("Translation.Pending")
+        };
+        var streamingFormat = mode == AssistantRequestMode.LayoutTranslate
+            ? ResultContentFormat.PlainText
+            : ResultContentFormat.Markdown;
+        var previousResult = source.Conversation is not null
+            ? source.Result?.Snapshot()
+            : null;
+        InteractiveOverlay resultOverlay;
+        ResultOverlayState resultState;
+        if (source is { Kind: InteractiveOverlayKind.Result, Result: { } existingResult })
+        {
+            resultOverlay = source;
+            resultState = existingResult;
+        }
+        else
+        {
+            resultState = new ResultOverlayState();
+            var resultPlane = CreateResultPlaneInFront(source.Plane, mode);
+            resultOverlay = AddInteractiveOverlay(
+                InteractiveOverlayKind.Result,
+                resultPlane,
+                capture: null,
+                resultState,
+                conversation: conversation);
+            resultOverlay.IsPresentationDeferred = mode == AssistantRequestMode.CustomCommand;
+        }
+        var requestId = resultState.Begin(
+            initialStatus,
+            streamingFormat,
+            mode == AssistantRequestMode.CustomCommand
+                ? conversation?.CreateView(pendingAnswer: initialStatus)
+                : null);
+        resultOverlay.IsDirty = true;
+        resultOverlay.SynchronizeTextureBuffers = true;
+        var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var submission = new ActiveSubmission
+        {
+            OperationId = operationId,
+            RequestId = requestId,
+            SourceOverlayId = source.Id,
+            OverlayId = resultOverlay.Id,
+            Mode = mode,
+            Conversation = conversation,
+            ConversationHistory = conversation?.Snapshot() ?? Array.Empty<AssistantConversationTurn>(),
+            PreviousResult = previousResult,
+            Stopwatch = Stopwatch.StartNew(),
+            Cancellation = requestCancellation
+        };
         _log.Info(
             $"{DiagnosticTag(operationId, requestId)} [submit] 从截图对象启动请求：" +
-            $"源Overlay={source.Id}，结果Overlay={resultOverlay.Id}，模式={mode}");
-        _submissionTask = ExecuteTranslationAsync(
-            capture,
-            mode,
-            operationId,
-            requestId,
-            text => QueueResultUpdate(resultOverlay.Id, operationId, requestId, text),
-            cancellationToken);
-        Publish(initialStatus, SelectionState.Idle);
+            $"源Overlay={source.Id}，结果Overlay={resultOverlay.Id}，模式={mode}，" +
+            $"历史轮数={submission.ConversationHistory.Count}");
+        submission.Task = ExecuteTranslationAsync(
+            sourceCapture,
+            submission,
+            requestCancellation.Token);
+        _submissions.Add(operationId, submission);
+        _pendingSubmissionMode = AssistantRequestMode.Translate;
+        Publish(statusMessage, SelectionState.Idle);
     }
 
     private async Task<TranslationResult> ExecuteTranslationAsync(
         CapturedFrame capture,
-        AssistantRequestMode mode,
-        long operationId,
-        long requestId,
-        Action<string>? onPartialResult,
+        ActiveSubmission submission,
         CancellationToken cancellationToken)
     {
-        var diagnosticTag = DiagnosticTag(operationId, requestId);
+        var diagnosticTag = DiagnosticTag(submission.OperationId, submission.RequestId);
         _log.Info($"{diagnosticTag} [submit] 使用已有截图，开始处理命令。");
         string? customCommand = null;
         try
         {
-            if (mode == AssistantRequestMode.CustomCommand)
+            if (submission.Mode == AssistantRequestMode.CustomCommand)
             {
                 if (_commandRecordingError is not null)
                 {
@@ -834,17 +1722,28 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                     diagnosticTag,
                     cancellationToken);
                 customCommand = transcription.Text.Trim();
+                submission.CustomCommand = customCommand;
+                var analyzingStatus = L("Translation.AnalyzingImage");
                 QueueResultUpdate(
-                    _activeResultOverlayId ?? 0,
-                    operationId,
-                    requestId,
-                    $"识别命令：{customCommand}\n\n正在分析画面...");
-                Publish($"已识别命令：{customCommand}", SelectionState.Idle);
+                    submission,
+                    submission.Conversation?.FormatPending(
+                        customCommand,
+                        analyzingStatus) ??
+                    LF("Translation.CommandPending", customCommand),
+                    submission.Conversation?.CreateView(customCommand, analyzingStatus));
+                Publish(LF("Translation.CommandRecognized", customCommand), SelectionState.Idle);
             }
             else
             {
-                _log.Info($"{diagnosticTag} [audio] 短按模式，取消并删除暂存录音。");
-                await _commandRecorder.CancelAsync(cancellationToken);
+                if (_commandRecorder.IsRecording)
+                {
+                    _log.Info($"{diagnosticTag} [audio] 短按模式，取消并删除暂存录音。");
+                    await _commandRecorder.CancelAsync(cancellationToken);
+                }
+                else
+                {
+                    _log.Info($"{diagnosticTag} [audio] 直接翻译模式，无需语音命令。");
+                }
             }
         }
         catch (Exception exception)
@@ -856,11 +1755,22 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         _log.Info(
             $"{diagnosticTag} [submit] 进入后端阶段：" +
             $"截图={Path.GetFileName(capture.Path)}，命令字符={customCommand?.Length ?? 0}");
+        void ReportPartial(string partial)
+        {
+            var display = submission.Conversation is not null && customCommand is not null
+                ? submission.Conversation.FormatPending(customCommand, partial)
+                : partial;
+            QueueResultUpdate(
+                submission,
+                display,
+                submission.Conversation?.CreateView(customCommand, partial));
+        }
         return await _pipeline.ExecuteAsync(
             capture,
-            mode,
+            submission.Mode,
             customCommand,
-            onPartialResult,
+            submission.ConversationHistory,
+            ReportPartial,
             cancellationToken,
             diagnosticTag);
     }
@@ -890,12 +1800,12 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             _log.Info(
                 $"{DiagnosticTag()} [capture] 截图对象已创建：Overlay={overlay.Id}，" +
                 $"文件={Path.GetFileName(capture.Path)}；纹理已在恢复显示前准备。");
-            Publish("截图已生成；触碰或抓住截图后按左摇杆翻译。", SelectionState.Idle);
+            Publish(L("Capture.Ready"), SelectionState.Idle);
         }
         catch (Exception exception)
         {
             _log.Error($"{DiagnosticTag()} [capture] 捕获失败。", exception);
-            Publish($"捕获失败：{exception.Message}", SelectionState.Idle, true);
+            Publish(LF("Capture.Failed", exception.Message), SelectionState.Idle, true);
         }
         finally
         {
@@ -908,75 +1818,217 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         }
     }
 
-    private async Task CompleteSubmissionIfReadyAsync()
+    private async Task CompleteSubmissionsIfReadyAsync()
     {
-        if (_submissionTask is null || !_submissionTask.IsCompleted)
+        var completed = _submissions.Values
+            .Where(submission => submission.Task.IsCompleted)
+            .ToArray();
+        foreach (var submission in completed)
         {
-            return;
+            await CompleteSubmissionAsync(submission);
         }
+    }
 
+    private async Task CompleteSubmissionAsync(ActiveSubmission submission)
+    {
+        var diagnosticTag = DiagnosticTag(submission.OperationId, submission.RequestId);
         try
         {
-            var result = await _submissionTask;
-            var diagnosticTag = DiagnosticTag(_activeOperationId, _activeSubmissionRequestId);
+            var result = await submission.Task;
             var text = string.IsNullOrWhiteSpace(result.Text)
-                ? $"截图已保存\n{Path.GetFileName(result.CapturePath)}"
+                ? LF("Translation.CaptureSaved", Path.GetFileName(result.CapturePath))
                 : result.Text;
-            var resultOverlay = _activeResultOverlayId is { } overlayId
-                ? FindOverlay(overlayId)
-                : null;
-            if (_activeSubmissionRequestId is { } requestId && resultOverlay?.Result is { } resultState)
+            AssistantConversationView? chat = null;
+            if (result.Mode == AssistantRequestMode.CustomCommand &&
+                submission.Conversation is not null &&
+                !string.IsNullOrWhiteSpace(result.CustomCommand))
             {
-                resultState.Complete(requestId, text, isError: false);
-                resultOverlay.IsDirty = true;
+                text = submission.Conversation.Append(result.CustomCommand, text);
+                chat = submission.Conversation.CreateView();
             }
-            var operationName = result.Mode == AssistantRequestMode.CustomCommand ? "自定义命令" : "翻译";
+            var prepared = await PrepareResultContentAsync(
+                result,
+                text,
+                diagnosticTag,
+                submission.Cancellation.Token);
+            var resultOverlay = FindOverlay(submission.OverlayId);
+            if (resultOverlay?.Result is { } resultState)
+            {
+                resultOverlay.IsPresentationDeferred = false;
+                resultState.Complete(
+                    submission.RequestId,
+                    prepared.DisplayText,
+                    isError: false,
+                    prepared.Format,
+                    prepared.VisibleText,
+                    prepared.RenderedImage,
+                    chat);
+                resultOverlay.IsDirty = true;
+                resultOverlay.SynchronizeTextureBuffers = true;
+            }
+            var operationName = result.Mode switch
+            {
+                AssistantRequestMode.CustomCommand => L("Translation.Operation.Custom"),
+                AssistantRequestMode.LayoutTranslate => L("Translation.Operation.Layout"),
+                _ => L("Translation.Operation.Direct")
+            };
             _log.Info(
                 $"{diagnosticTag} [submit] {operationName}完成：" +
-                $"总耗时={_submissionStopwatch?.Elapsed.TotalMilliseconds:F0} ms，" +
-                $"结果字符={result.Text?.Length ?? 0}，流式更新={_resultUpdateSequence}，" +
+                $"总耗时={submission.Stopwatch.Elapsed.TotalMilliseconds:F0} ms，" +
+                $"结果字符={result.Text?.Length ?? 0}，流式更新={submission.ResultUpdateSequence}，" +
+                $"格式={prepared.Format}，渲染图={(prepared.RenderedImage?.Length ?? 0):N0} bytes，" +
                 $"截图={Path.GetFileName(result.CapturePath)}");
-            Publish($"{operationName}完成。", SelectionState.Idle);
+            Publish(LF("Translation.Completed", operationName), _selection.Snapshot.State);
+        }
+        catch (OperationCanceledException) when (submission.Cancellation.IsCancellationRequested)
+        {
+            _log.Info($"{diagnosticTag} [submit] 请求已因结果窗口关闭或服务停止而取消。");
+        }
+        catch (NoSpeechRecognizedException exception)
+        {
+            _log.Info(
+                $"{diagnosticTag} [submit] 未识别到有效语音，不显示新的对话窗口：{exception.Message}");
+            var resultOverlay = FindOverlay(submission.OverlayId);
+            if (resultOverlay?.Result is { } resultState &&
+                submission.PreviousResult is { } previousResult)
+            {
+                resultState.Restore(previousResult);
+                resultOverlay.IsPresentationDeferred = false;
+                resultOverlay.IsDirty = true;
+                resultOverlay.SynchronizeTextureBuffers = true;
+            }
+            else if (resultOverlay is not null)
+            {
+                RemoveInteractiveOverlay(resultOverlay.Id, "语音命令未识别到声音", publishStatus: false);
+            }
+            Publish(L("Command.NoSpeech"), SelectionState.Idle);
         }
         catch (Exception exception)
         {
             _log.Error(
-                $"{DiagnosticTag(_activeOperationId, _activeSubmissionRequestId)} [submit] " +
-                $"捕获或翻译失败：总耗时={_submissionStopwatch?.Elapsed.TotalMilliseconds:F0} ms。",
+                $"{diagnosticTag} [submit] 捕获或翻译失败：" +
+                $"总耗时={submission.Stopwatch.Elapsed.TotalMilliseconds:F0} ms。",
                 exception);
-            var resultOverlay = _activeResultOverlayId is { } overlayId
-                ? FindOverlay(overlayId)
-                : null;
-            if (_activeSubmissionRequestId is { } requestId && resultOverlay?.Result is { } resultState)
+            var resultOverlay = FindOverlay(submission.OverlayId);
+            if (resultOverlay?.Result is { } resultState)
             {
-                resultState.Complete(requestId, $"翻译失败\n{exception.Message}", isError: true);
+                resultOverlay.IsPresentationDeferred = false;
+                if (submission.PreviousResult is { } previousResult)
+                {
+                    resultState.Restore(previousResult);
+                }
+                else
+                {
+                    var errorText = LF("Translation.ErrorText", exception.Message);
+                    resultState.Complete(
+                        submission.RequestId,
+                        errorText,
+                        isError: true,
+                        ResultContentFormat.PlainText,
+                        ResultContentFormatter.NormalizeVisibleText(errorText),
+                        chat: submission.Conversation?.CreateView(
+                            submission.CustomCommand,
+                            errorText));
+                }
                 resultOverlay.IsDirty = true;
+                resultOverlay.SynchronizeTextureBuffers = true;
             }
-            Publish($"翻译失败：{exception.Message}", SelectionState.Idle, true);
+            Publish(LF("Translation.Failed", exception.Message), _selection.Snapshot.State, true);
         }
         finally
         {
-            _submissionStopwatch?.Stop();
-            _submissionTask = null;
-            _activeSubmissionRequestId = null;
-            _activeResultOverlayId = null;
-            _submissionStopwatch = null;
-            _activeOperationId = null;
+            submission.Stopwatch.Stop();
+            _submissions.Remove(submission.OperationId);
+            submission.Cancellation.Dispose();
             RenderInteractiveOverlays(force: true);
         }
     }
 
-    private void QueueResultUpdate(long overlayId, long operationId, long requestId, string text)
+    private async Task<PreparedResultContent> PrepareResultContentAsync(
+        TranslationResult result,
+        string text,
+        string diagnosticTag,
+        CancellationToken cancellationToken)
     {
-        var sequence = Interlocked.Increment(ref _resultUpdateSequence);
+        if (result.ContentFormat == ResultContentFormat.Html)
+        {
+            try
+            {
+                _log.Info(
+                    $"{diagnosticTag} [html] 开始离屏渲染：" +
+                    $"源分辨率={result.SourcePixelWidth}x{result.SourcePixelHeight}，" +
+                    $"HTML={text.Length} 字符。");
+                var rendered = await _htmlResultRenderer.Value.RenderAsync(
+                    text,
+                    result.SourcePixelWidth,
+                    result.SourcePixelHeight,
+                    cancellationToken);
+                return new PreparedResultContent(
+                    rendered.VisibleText,
+                    rendered.VisibleText,
+                    ResultContentFormat.Html,
+                    rendered.RenderedImage);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                _log.Error(
+                    $"{diagnosticTag} [html] 排版结果渲染失败，已回退纯文本窗口。",
+                    exception);
+                var fallback = ResultContentFormatter.ExtractHtmlVisibleText(text);
+                if (string.IsNullOrWhiteSpace(fallback))
+                {
+                    fallback = L("Translation.LayoutNoVisibleText");
+                }
+                return new PreparedResultContent(
+                    fallback,
+                    fallback,
+                    ResultContentFormat.PlainText,
+                    null);
+            }
+        }
+
+        if (result.ContentFormat == ResultContentFormat.Markdown)
+        {
+            try
+            {
+                var visibleText = _renderer.ExtractVisibleText(ResultContentFormat.Markdown, text);
+                return new PreparedResultContent(
+                    text,
+                    visibleText,
+                    ResultContentFormat.Markdown,
+                    null);
+            }
+            catch (Exception exception)
+            {
+                _log.Error(
+                    $"{diagnosticTag} [markdown] Markdown 解析失败，已回退纯文本窗口。",
+                    exception);
+            }
+        }
+
+        var plainText = ResultContentFormatter.NormalizeVisibleText(text);
+        return new PreparedResultContent(
+            plainText,
+            plainText,
+            ResultContentFormat.PlainText,
+            null);
+    }
+
+    private void QueueResultUpdate(
+        ActiveSubmission submission,
+        string text,
+        AssistantConversationView? chat = null)
+    {
+        var sequence = submission.NextResultUpdateSequence();
         _resultUpdates.Enqueue(
             new ResultProgressUpdate(
-                overlayId,
-                requestId,
-                operationId,
+                submission.OverlayId,
+                submission.RequestId,
+                submission.OperationId,
                 sequence,
                 text,
-                DateTimeOffset.Now));
+                DateTimeOffset.Now,
+                chat));
     }
 
     private void DrainResultUpdates()
@@ -984,11 +2036,13 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         while (_resultUpdates.TryDequeue(out var update))
         {
             var overlay = FindOverlay(update.OverlayId);
-            var accepted = overlay?.Result?.Update(update.RequestId, update.Text) == true;
+            var accepted = overlay?.Result?.Update(update.RequestId, update.Text, update.Chat) == true;
             var queueDelay = DateTimeOffset.Now - update.QueuedAt;
             if (accepted)
             {
+                overlay!.IsPresentationDeferred = false;
                 overlay!.IsDirty = true;
+                overlay.SynchronizeTextureBuffers = true;
             }
 
             if (!accepted || update.Sequence == 1 || update.Sequence % 10 == 0)
@@ -1017,13 +2071,9 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         }
 
         _interactiveOverlaysSuppressed = false;
-        foreach (var overlay in _interactiveOverlays)
-        {
-            overlay.IsDirty = true;
-        }
         if (_spatialOverlaysVisible)
         {
-            RenderInteractiveOverlays(force: true);
+            RenderInteractiveOverlays();
         }
         _log.Info($"{DiagnosticTag()} [overlay] 恢复空间对象：原因={reason}，数量={_interactiveOverlays.Count}。");
     }
@@ -1048,7 +2098,8 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                                 capture: null,
                                 resultState: null,
                                 source,
-                                source.Options.CanGrab);
+                                source.Options.CanGrab,
+                                showToolbarWhenGrabbed: source.Options.ShowToolbarWhenGrabbed);
                             _spatialOverlaysVisible = true;
                             createdOverlay.IsDirty = true;
                             _log.Info(
@@ -1070,6 +2121,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                         var removed = closingOverlay?.WindowSource is not null;
                         if (removed)
                         {
+                            _diagnosticPressedOverlayIds.Remove(close.OverlayId);
                             RemoveInteractiveOverlay(close.OverlayId, "WPF 扩展接口关闭");
                         }
                         close.Completion.TrySetResult(removed);
@@ -1079,6 +2131,26 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                         if (FindOverlay(invalidate.OverlayId) is { WindowSource: not null } invalidatedOverlay)
                         {
                             invalidatedOverlay.IsDirty = true;
+                        }
+                        break;
+                    case ResizeWpfOverlayCommand resize:
+                        if (FindOverlay(resize.OverlayId) is { WindowSource: { } resizingSource } resizingOverlay)
+                        {
+                            var width = Math.Clamp(resize.WidthMeters, 0.06f, 2.5f);
+                            var height = width / (float)resizingSource.AspectRatio;
+                            resizingOverlay.Plane = resizingOverlay.Plane with
+                            {
+                                Width = width,
+                                Height = height,
+                                OverlayExtent = MathF.Max(MathF.Max(width, height) * 1.08f, 0.12f)
+                            };
+                            resizingOverlay.IsChromeDirty = true;
+                            resizingOverlay.IsProgressDirty = true;
+                            _pointerStabilizer.Reset();
+                            _pointerRayStabilizer.Reset();
+                            _log.Info(
+                                $"[overlay] WPF 窗口尺寸已热更新：Overlay={resize.OverlayId}，" +
+                                $"尺寸={width:F3}x{height:F3}m。");
                         }
                         break;
                 }
@@ -1116,6 +2188,383 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         }
     }
 
+    private void DrainDiagnosticResultOverlayCommands()
+    {
+        while (_diagnosticResultOverlayCommands.TryDequeue(out var command))
+        {
+            try
+            {
+                switch (command)
+                {
+                    case ShowDiagnosticMarkdownOverlayCommand show:
+                    {
+                        var state = new ResultOverlayState();
+                        var requestId = state.Begin(show.Markdown, ResultContentFormat.Markdown);
+                        state.Complete(
+                            requestId,
+                            show.Markdown,
+                            isError: false,
+                            ResultContentFormat.Markdown,
+                            _renderer.ExtractVisibleText(ResultContentFormat.Markdown, show.Markdown));
+                        var createdOverlay = AddInteractiveOverlay(
+                            InteractiveOverlayKind.Result,
+                            CreateDiagnosticResultPlane(),
+                            capture: null,
+                            state,
+                            canGrab: true,
+                            showToolbarWhenGrabbed: false);
+                        _spatialOverlaysVisible = true;
+                        createdOverlay.IsDirty = true;
+                        createdOverlay.SynchronizeTextureBuffers = true;
+                        show.Completion.TrySetResult(createdOverlay.Id);
+                        break;
+                    }
+                    case ShowDiagnosticChatOverlayCommand show:
+                    {
+                        var state = new ResultOverlayState();
+                        state.Begin(
+                            DiagnosticChatText(show.Chat),
+                            ResultContentFormat.Markdown,
+                            show.Chat);
+                        var createdOverlay = AddInteractiveOverlay(
+                            InteractiveOverlayKind.Result,
+                            CreateDiagnosticResultPlane(),
+                            capture: null,
+                            state,
+                            canGrab: true,
+                            showToolbarWhenGrabbed: false);
+                        _spatialOverlaysVisible = true;
+                        createdOverlay.IsDirty = true;
+                        createdOverlay.SynchronizeTextureBuffers = true;
+                        show.Completion.TrySetResult(createdOverlay.Id);
+                        break;
+                    }
+                    case UpdateDiagnosticChatOverlayCommand update:
+                    {
+                        if (FindOverlay(update.OverlayId) is { Result: { } chatResult } chatOverlay &&
+                            chatResult.Snapshot() is { } snapshot &&
+                            chatResult.Update(
+                                snapshot.RequestId,
+                                DiagnosticChatText(update.Chat),
+                                update.Chat))
+                        {
+                            chatOverlay.IsDirty = true;
+                        }
+                        break;
+                    }
+                    case ScrollDiagnosticResultOverlayCommand scroll:
+                        if (FindOverlay(scroll.OverlayId) is { Result: { } result } overlay &&
+                            result.Scroll(scroll.Delta, overlay.MaximumScroll))
+                        {
+                            overlay.IsDirty = true;
+                        }
+                        break;
+                    case CloseDiagnosticResultOverlayCommand close:
+                    {
+                        var closingOverlay = FindOverlay(close.OverlayId);
+                        var removed = closingOverlay?.Result is not null;
+                        if (removed)
+                        {
+                            RemoveInteractiveOverlay(
+                                close.OverlayId,
+                                "诊断结果窗口关闭",
+                                publishStatus: false);
+                        }
+                        close.Completion.TrySetResult(removed);
+                        break;
+                    }
+                }
+            }
+            catch (Exception exception)
+            {
+                _log.Error("处理诊断结果窗口命令失败。", exception);
+                switch (command)
+                {
+                    case ShowDiagnosticMarkdownOverlayCommand show:
+                        show.Completion.TrySetException(exception);
+                        break;
+                    case ShowDiagnosticChatOverlayCommand show:
+                        show.Completion.TrySetException(exception);
+                        break;
+                    case CloseDiagnosticResultOverlayCommand close:
+                        close.Completion.TrySetException(exception);
+                        break;
+                }
+            }
+        }
+    }
+
+    private void CancelPendingDiagnosticResultOverlayCommands()
+    {
+        while (_diagnosticResultOverlayCommands.TryDequeue(out var command))
+        {
+            var exception = new OperationCanceledException("SteamVR 服务已停止。");
+            switch (command)
+            {
+                case ShowDiagnosticMarkdownOverlayCommand show:
+                    show.Completion.TrySetException(exception);
+                    break;
+                case ShowDiagnosticChatOverlayCommand show:
+                    show.Completion.TrySetException(exception);
+                    break;
+                case CloseDiagnosticResultOverlayCommand close:
+                    close.Completion.TrySetException(exception);
+                    break;
+            }
+        }
+    }
+
+    private static string DiagnosticChatText(AssistantConversationView chat)
+    {
+        if (!string.IsNullOrWhiteSpace(chat.PendingAnswer))
+        {
+            return chat.PendingAnswer;
+        }
+        if (chat.Turns.Count > 0)
+        {
+            return chat.Turns[^1].Assistant;
+        }
+        return "...";
+    }
+
+    private void DrainDiagnosticWpfPointerCommands()
+    {
+        DiagnosticWpfPointerCommand? latest = null;
+        while (_diagnosticWpfPointerCommands.TryDequeue(out var command))
+        {
+            latest = command;
+        }
+        if (latest is not { } pointer)
+        {
+            return;
+        }
+
+        if (FindOverlay(pointer.OverlayId) is not { WindowSource: { } source } overlay)
+        {
+            _diagnosticPressedOverlayIds.Remove(pointer.OverlayId);
+            return;
+        }
+
+        var processedAt = Stopwatch.GetTimestamp();
+        NormalizedPoint? resolvedTexturePoint = null;
+        NormalizedPoint? resolvedContentPoint = null;
+        Vector3f? resolvedWorldPoint = null;
+        if (pointer.Leave)
+        {
+            source.PointerLeave();
+            SetPointerVisual(null, null);
+        }
+        else if (pointer.UseOpenVrIntersection)
+        {
+            var target = overlay.Plane.Center +
+                         (overlay.Plane.Right * ((pointer.TexturePoint.X - 0.5f) * overlay.Plane.Width)) +
+                         (overlay.Plane.Up * ((0.5f - pointer.TexturePoint.Y) * overlay.Plane.Height));
+            var raySource = target + (overlay.Plane.Normal * 0.5f);
+            var rayDirection = overlay.Plane.Normal * -1f;
+            if (_spatialOverlayManager?.TryIntersect(
+                    pointer.OverlayId,
+                    raySource,
+                    rayDirection,
+                    CurrentTrackingOrigin(),
+                    overlay.Plane,
+                    out var hit) == true)
+            {
+                resolvedTexturePoint = hit.TexturePoint;
+                resolvedContentPoint = hit.ContentPoint;
+                resolvedWorldPoint = hit.WorldPoint;
+            }
+        }
+        else
+        {
+            resolvedTexturePoint = pointer.TexturePoint.Clamp();
+            resolvedContentPoint = SpatialQuadOverlayMath.MapTextureToContent(
+                resolvedTexturePoint.Value);
+        }
+
+        var contentPoint = resolvedContentPoint ?? default;
+        if (!pointer.Leave && resolvedContentPoint is not null && pointer.DispatchInput)
+        {
+            var wasPressed = _diagnosticPressedOverlayIds.Contains(pointer.OverlayId);
+            if (pointer.IsPressed)
+            {
+                if (wasPressed)
+                {
+                    source.PointerMove(contentPoint);
+                }
+                else
+                {
+                    source.PointerDown(contentPoint);
+                    _diagnosticPressedOverlayIds.Add(pointer.OverlayId);
+                }
+            }
+            else if (wasPressed)
+            {
+                source.PointerUp(contentPoint);
+                _diagnosticPressedOverlayIds.Remove(pointer.OverlayId);
+            }
+            else
+            {
+                source.PointerMove(contentPoint);
+            }
+        }
+        else if (!pointer.Leave && resolvedContentPoint is not null)
+        {
+            source.PointerMove(contentPoint);
+        }
+        if (!pointer.Leave && resolvedTexturePoint is { } texturePoint)
+        {
+            SetPointerVisual(
+                pointer.OverlayId,
+                new OverlayPointerVisual(
+                    ETrackedControllerRole.RightHand,
+                    texturePoint,
+                    contentPoint,
+                    pointer.IsPressed,
+                    WorldPoint: resolvedWorldPoint));
+        }
+        DiagnosticWpfPointerProcessed?.Invoke(
+            this,
+            new DiagnosticWpfPointerProcessedEventArgs(
+                pointer.RequestId,
+                pointer.OverlayId,
+                pointer.IsPressed,
+                pointer.TexturePoint,
+                resolvedTexturePoint,
+                source.GetHoveredElementNameForDiagnostics(),
+                pointer.UseOpenVrIntersection,
+                pointer.Leave,
+                processedAt,
+                Stopwatch.GetElapsedTime(pointer.RequestedTimestamp, processedAt)));
+    }
+
+    private void DrainDiagnosticWpfInteractionCommands()
+    {
+        while (_diagnosticWpfInteractionCommands.TryDequeue(out var command))
+        {
+            var processedAt = Stopwatch.GetTimestamp();
+            var overlay = FindOverlay(command.OverlayId);
+            var source = overlay?.WindowSource;
+            if (overlay is null || source is null)
+            {
+                PublishDiagnosticInteractionFailure(command, processedAt, "Overlay is not available.");
+                continue;
+            }
+
+            NormalizedPoint texturePoint;
+            var succeeded = true;
+            string? failure = null;
+            switch (command.Kind)
+            {
+                case DiagnosticWpfInteractionKind.Click:
+                {
+                    var center = source.FindNamedElementCenter(command.ControlName ?? string.Empty);
+                    if (center is not { } point)
+                    {
+                        succeeded = false;
+                        failure = $"Control '{command.ControlName}' is unavailable.";
+                        texturePoint = command.TexturePoint;
+                        break;
+                    }
+
+                    texturePoint = point;
+                    source.PointerMove(point);
+                    SetPointerVisual(
+                        command.OverlayId,
+                        new OverlayPointerVisual(
+                            ETrackedControllerRole.RightHand,
+                            point,
+                            point,
+                            IsPressed: true));
+                    source.PointerDown(point);
+                    succeeded = source.PointerUp(point) != false;
+                    if (!succeeded)
+                    {
+                        failure = $"Control '{command.ControlName}' did not accept the click.";
+                    }
+                    break;
+                }
+                case DiagnosticWpfInteractionKind.Scroll:
+                    texturePoint = command.TexturePoint;
+                    source.PointerWheel(texturePoint, command.WheelDelta);
+                    break;
+                default:
+                    texturePoint = command.TexturePoint;
+                    succeeded = false;
+                    failure = "Unknown diagnostic interaction.";
+                    break;
+            }
+
+            SetPointerVisual(
+                command.OverlayId,
+                new OverlayPointerVisual(
+                    ETrackedControllerRole.RightHand,
+                    texturePoint,
+                    texturePoint,
+                    IsPressed: false));
+            if (!succeeded)
+            {
+                PublishDiagnosticInteractionFailure(command, processedAt, failure);
+                continue;
+            }
+
+            if (!_pendingDiagnosticWpfInteractions.TryGetValue(command.OverlayId, out var pending))
+            {
+                pending = [];
+                _pendingDiagnosticWpfInteractions[command.OverlayId] = pending;
+            }
+            pending.Add(new PendingDiagnosticWpfInteraction(
+                command.RequestId,
+                command.OverlayId,
+                command.Kind,
+                command.ControlName,
+                command.RequestedTimestamp,
+                processedAt));
+        }
+    }
+
+    private void PublishDiagnosticInteractionFailure(
+        DiagnosticWpfInteractionCommand command,
+        long processedAt,
+        string? failure)
+    {
+        DiagnosticWpfInteractionCompleted?.Invoke(
+            this,
+            new DiagnosticWpfInteractionCompletedEventArgs(
+                command.RequestId,
+                command.OverlayId,
+                command.Kind,
+                command.ControlName,
+                succeeded: false,
+                processedAt,
+                Stopwatch.GetElapsedTime(command.RequestedTimestamp, processedAt),
+                TimeSpan.Zero,
+                failure));
+    }
+
+    private void CompletePendingDiagnosticWpfInteractions(long overlayId, long renderedAt)
+    {
+        if (!_pendingDiagnosticWpfInteractions.Remove(overlayId, out var pending))
+        {
+            return;
+        }
+
+        foreach (var interaction in pending)
+        {
+            DiagnosticWpfInteractionCompleted?.Invoke(
+                this,
+                new DiagnosticWpfInteractionCompletedEventArgs(
+                    interaction.RequestId,
+                    interaction.OverlayId,
+                    interaction.Kind,
+                    interaction.ControlName,
+                    succeeded: true,
+                    renderedAt,
+                    Stopwatch.GetElapsedTime(interaction.RequestedTimestamp, renderedAt),
+                    Stopwatch.GetElapsedTime(interaction.ProcessedTimestamp, renderedAt),
+                    null));
+        }
+    }
+
     private SpatialSelectionPlane CreateWpfWindowPlane(WpfWindowOverlaySource source)
     {
         var poses = new TrackedDevicePose_t[OpenVR.k_unMaxTrackedDeviceCount];
@@ -1137,14 +2586,53 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         var width = source.Options.WidthMeters;
         var height = width / (float)source.AspectRatio;
         var extent = MathF.Max(MathF.Max(width, height) * 1.08f, 0.12f);
+        var center = Position(matrix) + (forward * source.Options.DistanceMeters);
+        if (source.Options.Placement == WpfSpatialOverlayPlacement.LeftHand &&
+            ReadControllerPose(ETrackedControllerRole.LeftHand, poses) is { } leftHand)
+        {
+            center = leftHand.Position + (up * (height * 0.62f)) + (forward * 0.04f);
+        }
         return new SpatialSelectionPlane(
-            Position(matrix) + (forward * source.Options.DistanceMeters),
+            center,
             right,
             up,
             normal,
             width,
             height,
             extent,
+            new NormalizedPoint(0f, 0f),
+            new NormalizedPoint(1f, 1f),
+            0f);
+    }
+
+    private SpatialSelectionPlane CreateDiagnosticResultPlane()
+    {
+        var poses = new TrackedDevicePose_t[OpenVR.k_unMaxTrackedDeviceCount];
+        OpenVR.System.GetDeviceToAbsoluteTrackingPose(
+            CurrentTrackingOrigin(),
+            0f,
+            poses);
+        var hmdPose = poses[OpenVR.k_unTrackedDeviceIndex_Hmd];
+        if (!hmdPose.bPoseIsValid)
+        {
+            throw new InvalidOperationException("头显姿态不可用，无法放置诊断结果窗口。");
+        }
+
+        var matrix = hmdPose.mDeviceToAbsoluteTracking;
+        var forward = Forward(matrix);
+        var right = Right(matrix);
+        var normal = forward * -1f;
+        var up = Vector3f.Cross(normal, right).Normalized();
+        const float width = 0.36f;
+        const float height = 0.24f;
+        return new SpatialSelectionPlane(
+            Position(matrix) + (forward * ResultPlaneDistance),
+            right,
+            up,
+            normal,
+            width,
+            height,
+            0.40f,
             new NormalizedPoint(0f, 0f),
             new NormalizedPoint(1f, 1f),
             0f);
@@ -1186,6 +2674,16 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
 
     private void UpdateVrChatVoiceInput(bool physicallyPressed, CancellationToken cancellationToken)
     {
+        lock (_voiceInputSync)
+        {
+            _vrVoiceInputPressed = physicallyPressed;
+            UpdateCombinedVrChatVoiceInput(cancellationToken);
+        }
+    }
+
+    private void UpdateCombinedVrChatVoiceInput(CancellationToken cancellationToken)
+    {
+        var physicallyPressed = _vrVoiceInputPressed || _desktopVoiceInputPressed;
         if (physicallyPressed)
         {
             _voiceInputReleaseCandidateAt = null;
@@ -1217,6 +2715,22 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         _voiceInputTask = CompleteVrChatVoiceInputAsync(cancellationToken);
     }
 
+    private async Task CompleteDesktopVoiceReleaseAfterDebounceAsync()
+    {
+        try
+        {
+            await Task.Delay(VoiceInputReleaseDebounceMilliseconds + 10);
+            lock (_voiceInputSync)
+            {
+                UpdateCombinedVrChatVoiceInput(_cancellation?.Token ?? CancellationToken.None);
+            }
+        }
+        catch (Exception exception)
+        {
+            _log.Error("[voice-input] 桌面 PTT 松开处理失败。", exception);
+        }
+    }
+
     private void StartVrChatVoiceInput(CancellationToken cancellationToken)
     {
         if (_voiceInputTask is { IsCompleted: false })
@@ -1229,15 +2743,15 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         {
             _voiceInputRecorder.Start();
             _voiceInputPressed = true;
-            _log.Info("[voice-input] SteamVR PTT 按下，开始 VRChat 语音输入录音。");
+            _log.Info("[voice-input] PTT 按下，开始 VRChat 语音输入录音。");
             _ = SetVrChatTypingSafeAsync(true, cancellationToken);
-            Publish("VRChat 语音输入录音中...", _selection.Snapshot.State);
+            Publish(L("Voice.Recording"), _selection.Snapshot.State);
         }
         catch (Exception exception)
         {
             _voiceInputPressed = false;
             _log.Error("[voice-input] 启动录音失败。", exception);
-            Publish($"VRChat 录音失败：{exception.Message}", _selection.Snapshot.State, true);
+            Publish(LF("Voice.RecordFailed", exception.Message), _selection.Snapshot.State, true);
         }
     }
 
@@ -1248,7 +2762,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             using var audio = await _voiceInputRecorder.StopAsync(cancellationToken);
             _log.Info(
                 $"[voice-input] PTT 松开：录音={audio.Duration.TotalMilliseconds:F0} ms，开始 SenseVoice 识别。");
-            Publish("正在识别 VRChat 语音输入...", _selection.Snapshot.State);
+            Publish(L("Voice.Recognizing"), _selection.Snapshot.State);
             var transcriber = await GetSpeechTranscriberAsync();
             var result = await transcriber.TranscribeAsync(audio, "[voice-input]", cancellationToken);
             if (_vrChatOscOutput is null)
@@ -1256,11 +2770,88 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                 throw new InvalidOperationException("VRChat OSC 输出未初始化。");
             }
 
-            await _vrChatOscOutput.SendAsync(result.Text, cancellationToken);
+            var sourceText = result.Text.Trim();
+            var outputText = sourceText;
+            var translationSucceeded = false;
+            if (_configuration.VrChatVoiceInput.TranslationEnabled)
+            {
+                var oscPlan = VoiceTranslationOscPlan.Create(
+                    _configuration.VrChatVoiceInput.TranslationDisplayMode,
+                    _configuration.VrChatVoiceInput.SendImmediately);
+                if (oscPlan.ShowOriginal)
+                {
+                    await _vrChatOscOutput.SendAsync(
+                        sourceText,
+                        oscPlan.SendOriginalImmediately,
+                        cancellationToken);
+                    _log.Info(
+                        $"[voice-input] OSC 已输出待翻译原文：字符={sourceText.Length}，" +
+                        $"立即发送={_configuration.VrChatVoiceInput.SendImmediately}，" +
+                        $"文本={PreviewText(sourceText)}");
+                }
+
+                Publish(L("Voice.Translating"), _selection.Snapshot.State);
+                try
+                {
+                    outputText = await _pipeline.TranslateSpeechAsync(
+                        sourceText,
+                        _configuration.VrChatVoiceInput.TranslationTargetLanguage,
+                        _configuration.VrChatVoiceInput.TranslationSystemPrompt,
+                        _configuration.VrChatVoiceInput.TranslationPrompt,
+                        cancellationToken,
+                        "[voice-input]");
+                    translationSucceeded = true;
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    _log.Error("[voice-input] 语音翻译失败，将发送原始识别文本。", exception);
+                    Publish(
+                        LF("Voice.TranslationFallback", exception.Message),
+                        _selection.Snapshot.State,
+                        true);
+                }
+
+                if (oscPlan.ShowOriginal)
+                {
+                    if (translationSucceeded)
+                    {
+                        if (oscPlan.UpdateSubmittedOriginal)
+                        {
+                            await _vrChatOscOutput.UpdateSubmittedChatboxAsync(
+                                outputText,
+                                cancellationToken);
+                        }
+                        else
+                        {
+                            await _vrChatOscOutput.SendPreviewAsync(
+                                outputText,
+                                cancellationToken);
+                        }
+                        _log.Info(
+                            $"[voice-input] OSC 已用译文更新 Chatbox 输入框：字符={outputText.Length}，" +
+                            $"原文已提交={oscPlan.UpdateSubmittedOriginal}，" +
+                            $"更新通知音=False，文本={PreviewText(outputText)}");
+                        Publish(LF("Voice.Sent", outputText), _selection.Snapshot.State);
+                    }
+                    return;
+                }
+            }
+
+            var translationPlan = VoiceTranslationOscPlan.Create(
+                _configuration.VrChatVoiceInput.TranslationDisplayMode,
+                _configuration.VrChatVoiceInput.SendImmediately);
+            await _vrChatOscOutput.SendAsync(
+                outputText,
+                _configuration.VrChatVoiceInput.TranslationEnabled
+                    ? translationPlan.SendTranslationImmediately
+                    : _configuration.VrChatVoiceInput.SendImmediately,
+                cancellationToken);
             _log.Info(
                 $"[voice-input] OSC 已发送：目标={_configuration.VrChatVoiceInput.Host}:" +
-                $"{_configuration.VrChatVoiceInput.Port}，字符={result.Text.Length}，文本={PreviewText(result.Text)}");
-            Publish($"VRChat 已发送：{result.Text}", _selection.Snapshot.State);
+                $"{_configuration.VrChatVoiceInput.Port}，字符={result.Text.Length}，" +
+                $"分段间隔={_configuration.VrChatVoiceInput.StreamingChunkIntervalMilliseconds} ms，" +
+                $"文本={PreviewText(outputText)}");
+            Publish(LF("Voice.Sent", outputText), _selection.Snapshot.State);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -1269,7 +2860,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         catch (Exception exception)
         {
             _log.Error("[voice-input] 识别或 OSC 发送失败。", exception);
-            Publish($"VRChat 语音输入失败：{exception.Message}", _selection.Snapshot.State, true);
+            Publish(LF("Voice.Failed", exception.Message), _selection.Snapshot.State, true);
         }
         finally
         {
@@ -1312,9 +2903,9 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         }
     }
 
-    private void InitializeOpenVr()
+    private bool InitializeOpenVr()
     {
-        _log.Info("开始初始化 OpenVR Overlay 应用。");
+        _log.Info("开始以被动 Background 客户端连接已运行的 SteamVR。");
         if (!Environment.Is64BitProcess)
         {
             throw new InvalidOperationException("SteamVR 模块仅支持 Windows x64。");
@@ -1323,27 +2914,54 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         var assets = SteamVrManifestStore.EnsureExtracted();
         _log.Info($"SteamVR 动作清单：{assets.ActionManifestPath}");
         var initError = EVRInitError.None;
-        _ = OpenVR.Init(ref initError, EVRApplicationType.VRApplication_Overlay);
+        _ = OpenVR.Init(ref initError, OpenVrApplicationType);
+        if (initError == EVRInitError.Init_NoServerForBackgroundApp)
+        {
+            _log.Info("SteamVR 尚未接受连接；保持被动等待，不启动运行时。");
+            return false;
+        }
+
         if (initError != EVRInitError.None)
         {
             throw new InvalidOperationException(OpenVR.GetStringForHmdError(initError));
         }
 
         _openVrInitialized = true;
-        var applicationError = OpenVR.Applications.AddApplicationManifest(
-            assets.ApplicationManifestPath,
-            bTemporary: false);
-        if (applicationError is not EVRApplicationError.None and not EVRApplicationError.AppKeyAlreadyExists)
+        _log.Info("[steamvr-connect] OpenVR Background 客户端已连接运行时。");
+        if (OpenVR.Applications is null ||
+            OpenVR.Input is null ||
+            OpenVR.Overlay is null ||
+            OpenVR.System is null)
         {
-            throw new InvalidOperationException($"注册 SteamVR 应用清单失败：{applicationError}");
+            throw new InvalidOperationException(
+                "SteamVR 服务已连接，但合成器接口尚未就绪；程序将保持被动重试。");
         }
 
-        applicationError = OpenVR.Applications.IdentifyApplication(
+        var manifestError = OpenVR.Applications.AddApplicationManifest(
+            assets.ApplicationManifestPath,
+            bTemporary: false);
+        var manifestRegistration = new SteamVrApplicationRegistrationStatus(
+            manifestError,
+            EVRApplicationError.None);
+        if (!manifestRegistration.CanContinue)
+        {
+            throw new InvalidOperationException($"注册 SteamVR 应用清单失败：{manifestError}");
+        }
+
+        var identityError = OpenVR.Applications.IdentifyApplication(
             unchecked((uint)Environment.ProcessId),
             SteamVrManifestStore.ApplicationKey);
-        if (applicationError != EVRApplicationError.None)
+        if (identityError != EVRApplicationError.None)
         {
-            throw new InvalidOperationException($"识别 SteamVR 应用失败：{applicationError}");
+            _log.Warning(
+                $"[steamvr-connect] SteamVR 暂未识别当前应用身份：{identityError}。" +
+                "这通常发生在 SteamVR 已运行后首次注册清单；身份识别不是连接硬门槛，" +
+                "将继续直接加载动作清单。");
+        }
+        else
+        {
+            _log.Info(
+                $"[steamvr-connect] 应用清单与进程身份已就绪：Manifest={manifestError}。");
         }
 
         EnsureInput(OpenVR.Input.SetActionManifestPath(assets.ActionManifestPath), "载入动作清单");
@@ -1367,7 +2985,21 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
 
         _connected = true;
         _log.Info("SteamVR 叠加层和动作输入已连接。高优先级输入覆盖需要 SteamVR 开发者设置支持。");
-        Publish("SteamVR 已连接，等待翻译键。", SelectionState.Idle);
+        Publish(L("Runtime.Connected"), SelectionState.Idle);
+        return true;
+    }
+
+    private void PublishPassiveWait(string message)
+    {
+        if (string.Equals(_lastPassiveWaitStatus, message, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _lastPassiveWaitStatus = message;
+        _lastConnectionError = null;
+        _log.Info($"[steamvr-passive] {message}");
+        Publish(message, SelectionState.Idle);
     }
 
     private void CreateOverlays()
@@ -1387,6 +3019,14 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         foreach (var overlay in _interactiveOverlays)
         {
             overlay.IsDirty = true;
+            overlay.IsChromeDirty = true;
+            overlay.IsProgressDirty = true;
+            overlay.SynchronizeTextureBuffers = true;
+            overlay.SynchronizeVideoTextureBuffers = true;
+            overlay.SynchronizeChromeTextureBuffers = true;
+            overlay.SynchronizeProgressTextureBuffers = true;
+            overlay.SynchronizePointerTextureBuffers = true;
+            overlay.RenderedPointerPressed = null;
         }
         RenderInteractiveOverlays(force: true);
     }
@@ -1398,25 +3038,27 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         uint sortOrder,
         ref ulong handle)
     {
+        var overlayApi = OpenVR.Overlay ?? throw new InvalidOperationException(
+            "SteamVR Overlay 接口不可用；合成器可能仍在启动或已经退出。");
         var existing = OpenVR.k_ulOverlayHandleInvalid;
-        if (OpenVR.Overlay.FindOverlay(key, ref existing) == EVROverlayError.None)
+        if (overlayApi.FindOverlay(key, ref existing) == EVROverlayError.None)
         {
-            _ = OpenVR.Overlay.DestroyOverlay(existing);
+            _ = overlayApi.DestroyOverlay(existing);
         }
 
         EnsureOverlay(
-            OpenVR.Overlay.CreateOverlay(key, name, ref handle),
+            overlayApi.CreateOverlay(key, name, ref handle),
             $"创建叠加层 {name}");
-        EnsureOverlay(OpenVR.Overlay.SetOverlayWidthInMeters(handle, width), "设置叠加层宽度");
-        EnsureOverlay(OpenVR.Overlay.SetOverlayAlpha(handle, 1f), "设置叠加层透明度");
-        EnsureOverlay(OpenVR.Overlay.SetOverlayColor(handle, 1f, 1f, 1f), "设置叠加层颜色");
+        EnsureOverlay(overlayApi.SetOverlayWidthInMeters(handle, width), "设置叠加层宽度");
+        EnsureOverlay(overlayApi.SetOverlayAlpha(handle, 1f), "设置叠加层透明度");
+        EnsureOverlay(overlayApi.SetOverlayColor(handle, 1f, 1f, 1f), "设置叠加层颜色");
         EnsureOverlay(
-            OpenVR.Overlay.SetOverlayTextureColorSpace(handle, EColorSpace.Gamma),
+            overlayApi.SetOverlayTextureColorSpace(handle, EColorSpace.Gamma),
             "设置叠加层色彩空间");
         EnsureOverlay(
-            OpenVR.Overlay.SetOverlayInputMethod(handle, VROverlayInputMethod.None),
+            overlayApi.SetOverlayInputMethod(handle, VROverlayInputMethod.None),
             "设置叠加层输入方式");
-        EnsureOverlay(OpenVR.Overlay.SetOverlaySortOrder(handle, sortOrder), "设置叠加层层级");
+        EnsureOverlay(overlayApi.SetOverlaySortOrder(handle, sortOrder), "设置叠加层层级");
     }
 
     private void UpdateActionState()
@@ -1559,7 +3201,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             new Vector3f(matrix.m2, matrix.m6, matrix.m10).Normalized());
     }
 
-    private void UpdateOverlayInteraction()
+    private void UpdateOverlayInteraction(CancellationToken cancellationToken)
     {
         var leftGrip = ReadDigital(_leftGripActionHandle);
         var rightGrip = ReadDigital(_rightGripActionHandle);
@@ -1567,9 +3209,10 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         var rightPointerPressed = ReadDigital(_rightPointerClickActionHandle);
         if (_interactiveOverlaysSuppressed || !_spatialOverlaysVisible || _interactiveOverlays.Count == 0)
         {
+            SetContactHighlights(null, null);
             SetInteractionTarget(null);
             _interactionContactHand = null;
-            _grab = null;
+            _grabs.Clear();
             ResetOverlayPointer();
             _lastLeftGripPressed = leftGrip;
             _lastRightGripPressed = rightGrip;
@@ -1586,46 +3229,89 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             poses);
         var leftHand = ReadControllerPose(ETrackedControllerRole.LeftHand, poses);
         var rightHand = ReadControllerPose(ETrackedControllerRole.RightHand, poses);
+        var hmdPose = poses[OpenVR.k_unTrackedDeviceIndex_Hmd];
+        var viewerPosition = hmdPose.bPoseIsValid
+            ? Position(hmdPose.mDeviceToAbsoluteTracking)
+            : (Vector3f?)null;
 
-        if (_grab is { } grab)
+        var previousGrabCount = _grabs.Count;
+        var leftReleased = UpdateGrabForHand(
+            ETrackedControllerRole.LeftHand,
+            leftGrip,
+            leftHand,
+            origin);
+        var rightReleased = UpdateGrabForHand(
+            ETrackedControllerRole.RightHand,
+            rightGrip,
+            rightHand,
+            origin);
+
+        var leftContact = !_grabs.ContainsHand(ETrackedControllerRole.LeftHand) && leftHand is { } left
+            ? FindContact(left.Position)
+            : null;
+        var rightContact = !_grabs.ContainsHand(ETrackedControllerRole.RightHand) && rightHand is { } right
+            ? FindContact(right.Position)
+            : null;
+        if (leftHand is { } leftPose &&
+            leftContact is { } leftHit &&
+            OverlayGrabTransition.ShouldBegin(
+                leftGrip,
+                _lastLeftGripPressed,
+                leftContact,
+                rightReleased))
         {
-            var hand = grab.Hand == ETrackedControllerRole.LeftHand ? leftHand : rightHand;
-            var gripPressed = grab.Hand == ETrackedControllerRole.LeftHand ? leftGrip : rightGrip;
-            var overlay = FindOverlay(grab.OverlayId);
-            if (!gripPressed || hand is null || overlay is null)
-            {
-                _log.Info($"[interaction] 释放空间对象：Overlay={grab.OverlayId}。");
-                _grab = null;
-            }
-            else
-            {
-                overlay.Plane = SpatialOverlayInteraction.Move(grab, hand.Value);
-                _spatialOverlayManager?.UpdateTransform(overlay.Id, overlay.Plane, origin);
-                _interactionContactHand = grab.Hand;
-                SetInteractionTarget(overlay.Id);
-            }
+            BeginGrab(leftHit.OverlayId, ETrackedControllerRole.LeftHand, leftPose);
+        }
+        if (rightHand is { } rightPose &&
+            rightContact is { } rightHit &&
+            OverlayGrabTransition.ShouldBegin(
+                rightGrip,
+                _lastRightGripPressed,
+                rightContact,
+                leftReleased))
+        {
+            BeginGrab(rightHit.OverlayId, ETrackedControllerRole.RightHand, rightPose);
         }
 
-        if (_grab is null)
-        {
-            var leftContact = leftHand is { } left ? FindContact(left.Position) : null;
-            var rightContact = rightHand is { } right ? FindContact(right.Position) : null;
-            var selectedContact = Closest(leftContact, rightContact);
-            _interactionContactHand = selectedContact is null
-                ? null
-                : leftContact is { } selectedLeft &&
-                  (rightContact is null || selectedLeft.Distance <= rightContact.Value.Distance)
-                    ? ETrackedControllerRole.LeftHand
-                    : ETrackedControllerRole.RightHand;
-            SetInteractionTarget(selectedContact?.OverlayId);
+        SetContactHighlights(leftContact, rightContact, _grabs.Active);
 
-            if (leftGrip && !_lastLeftGripPressed && leftHand is { } leftPose && leftContact is { } leftHit)
+        if (_grabs.HasMultiple)
+        {
+            _interactionContactHand = null;
+            SetInteractionTarget(null);
+            if (previousGrabCount < 2)
             {
-                BeginGrab(leftHit.OverlayId, ETrackedControllerRole.LeftHand, leftPose);
+                CancelSingleOverlayCommand("双手同时抓取空间对象");
+                ResetOverlayPointer();
+                Publish(L("Interaction.MultipleStarted"), SelectionState.Idle);
+                _log.Info("[interaction] 进入双手抓取模式；工具栏、指针和滚动已禁用。");
             }
-            else if (rightGrip && !_lastRightGripPressed && rightHand is { } rightPose && rightContact is { } rightHit)
+        }
+        else if (_grabs.Single is { } activeGrab)
+        {
+            _interactionContactHand = activeGrab.Hand;
+            SetInteractionTarget(activeGrab.OverlayId);
+            if (previousGrabCount > 1)
             {
-                BeginGrab(rightHit.OverlayId, ETrackedControllerRole.RightHand, rightPose);
+                Publish(L("Interaction.SingleRestored"), SelectionState.Idle);
+                _log.Info("[interaction] 离开双手抓取模式；单窗口操作已恢复。");
+            }
+        }
+        else
+        {
+            var previousContactHand = _interactionContactHand;
+            var selectedContact = OverlayContactSelection.Select(
+                leftContact,
+                rightContact,
+                _interactionTargetOverlayId,
+                _interactionContactHand);
+            _interactionContactHand = selectedContact?.Hand;
+            SetInteractionTarget(selectedContact?.Contact.OverlayId);
+            if (previousContactHand != _interactionContactHand)
+            {
+                _log.Info(
+                    $"[interaction] 接触手变更：{previousContactHand?.ToString() ?? "None"} -> " +
+                    $"{_interactionContactHand?.ToString() ?? "None"}，Overlay={selectedContact?.Contact.OverlayId.ToString() ?? "None"}。");
             }
         }
 
@@ -1633,8 +3319,10 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             origin,
             leftHand,
             rightHand,
+            viewerPosition,
             leftPointerPressed,
-            rightPointerPressed);
+            rightPointerPressed,
+            cancellationToken);
         _lastLeftGripPressed = leftGrip;
         _lastRightGripPressed = rightGrip;
         _lastLeftPointerPressed = leftPointerPressed;
@@ -1645,11 +3333,20 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         ETrackingUniverseOrigin origin,
         TrackedHandPose? leftHand,
         TrackedHandPose? rightHand,
+        Vector3f? viewerPosition,
         bool leftPressed,
-        bool rightPressed)
+        bool rightPressed,
+        CancellationToken cancellationToken)
     {
-        var targetId = _pointerCapture?.OverlayId ?? _grab?.OverlayId ?? _interactionTargetOverlayId;
-        var contactHand = _grab?.Hand ?? _interactionContactHand;
+        if (_grabs.HasMultiple)
+        {
+            ResetOverlayPointer();
+            return;
+        }
+
+        var activeGrab = _grabs.Single;
+        var targetId = _pointerCapture?.OverlayId ?? activeGrab?.OverlayId ?? _interactionTargetOverlayId;
+        var contactHand = activeGrab?.Hand ?? _interactionContactHand;
         var pointerHand = _pointerCapture?.Hand ?? Opposite(contactHand);
         var target = targetId is { } id ? FindOverlay(id) : null;
         if (target is null || pointerHand is null || _spatialOverlayManager is null)
@@ -1664,50 +3361,169 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             ? _lastLeftPointerPressed
             : _lastRightPointerPressed;
         SpatialOverlayPointerHit? hit = null;
-        if (pose is { } handPose &&
-            _spatialOverlayManager.TryIntersect(
-                target.Id,
-                handPose.Position,
-                SpatialOverlayInteraction.PointerDirection(handPose),
-                origin,
-                target.Plane,
-                out var measuredHit))
+        OverlayPointerRayVisual? pointerRay = null;
+        if (pose is { } handPose)
         {
-            hit = measuredHit;
-            target.WindowSource?.PointerMove(measuredHit.ContentPoint);
-            if (target.WindowSource is not null)
+            var pointerNow = DateTimeOffset.Now;
+            var rawDirection = SpatialOverlayInteraction.PointerDirection(handPose);
+            var stabilizedRay = _pointerRayStabilizer.Update(
+                target.Id,
+                pointerHand.Value,
+                handPose.Position,
+                rawDirection,
+                pointerNow,
+                Volatile.Read(ref _pointerSmoothingStrength));
+            if (_spatialOverlayManager.TryIntersect(
+                    target.Id,
+                    stabilizedRay.Source,
+                    stabilizedRay.Direction,
+                    origin,
+                    target.Plane,
+                    out var measuredHit))
             {
-                target.IsDirty = true;
+                var pointerInterval = target.Result?.Snapshot()?.ContentFormat == ResultContentFormat.Html
+                    ? OverlayPointerStabilizer.HighResolutionUpdateInterval
+                    : OverlayPointerStabilizer.DefaultUpdateInterval;
+                var stabilized = _pointerStabilizer.Update(
+                    measuredHit.OverlayId,
+                    pointerHand.Value,
+                    measuredHit.TexturePoint,
+                    measuredHit.ContentPoint,
+                    pressed,
+                    pointerNow,
+                    pointerInterval);
+                hit = measuredHit with
+                {
+                    TexturePoint = stabilized.TexturePoint,
+                    ContentPoint = stabilized.ContentPoint
+                };
+                if (viewerPosition is { } viewer)
+                {
+                    pointerRay = new OverlayPointerRayVisual(
+                        stabilizedRay.Source,
+                        measuredHit.WorldPoint + (target.Plane.Normal * PointerLayerOffset),
+                        viewer);
+                }
+                var toolbarAction = IsToolbarVisible(target)
+                    ? OverlayToolbarLayout.HitTest(
+                        target.Kind,
+                        target.Plane,
+                        hit.Value.TexturePoint,
+                        target.ToolbarSide)
+                    : null;
+                var forwardToWindow = _pointerCapture is { } activeCapture
+                    ? activeCapture.ToolbarAction is null && !activeCapture.IsSwiping
+                    : toolbarAction is null;
+                if (forwardToWindow && stabilized.Changed)
+                {
+                    target.WindowSource?.PointerMove(hit.Value.ContentPoint);
+                }
             }
         }
 
         if (pressed && !wasPressed && hit is { } downHit)
         {
+            var toolbarAction = IsToolbarVisible(target)
+                ? OverlayToolbarLayout.HitTest(
+                    target.Kind,
+                    target.Plane,
+                    downHit.TexturePoint,
+                    target.ToolbarSide)
+                : null;
+            var windowControlName = toolbarAction is null
+                ? target.WindowSource?.PointerDown(downHit.ContentPoint)
+                : null;
             _pointerCapture = new OverlayPointerCapture(
                 target.Id,
                 pointerHand.Value,
                 downHit.TexturePoint,
-                downHit.ContentPoint);
-            target.WindowSource?.PointerDown(downHit.ContentPoint);
-            if (target.WindowSource is not null)
+                downHit.ContentPoint,
+                downHit.WorldPoint,
+                downHit.ContentPoint,
+                false,
+                toolbarAction,
+                windowControlName);
+            if (toolbarAction == OverlayToolbarAction.CustomCommand)
             {
-                target.IsDirty = true;
+                var wasCommandPressed = _commandPress.IsPressed;
+                var pressedAt = DateTimeOffset.Now;
+                HandleCommandButtonDown(
+                    OverlayCommandButtonSource,
+                    pressedAt,
+                    cancellationToken);
+                if (!wasCommandPressed &&
+                    _commandPress.IsPressed &&
+                    _commandTargetOverlayId == target.Id)
+                {
+                    _commandPress.ActivateLongHold(
+                        pressedAt.AddMilliseconds(
+                            _configuration.Speech.HoldThresholdMilliseconds));
+                    _pendingSubmissionMode = AssistantRequestMode.CustomCommand;
+                    _toolbarCommandPressOverlayId = target.Id;
+                    Publish(L("Command.ToolbarListening"), SelectionState.Idle);
+                }
             }
             _log.Info(
                 $"[pointer] 光标按下并锁定对象：Overlay={target.Id}，手={pointerHand}，" +
-                $"UV=({downHit.ContentPoint.X:F3},{downHit.ContentPoint.Y:F3})。");
+                $"UV=({downHit.ContentPoint.X:F3},{downHit.ContentPoint.Y:F3})，" +
+                $"工具栏={toolbarAction?.ToString() ?? "None"}，" +
+                $"WPF控件={windowControlName ?? "None"}。");
         }
 
         if (_pointerCapture is { } capture && capture.OverlayId == target.Id)
         {
             if (hit is { } currentHit)
             {
+                var previousContentPoint = capture.LastContentPoint;
+                var startsSwipe = false;
+                if (pressed && capture.ToolbarAction is null && !capture.IsSwiping)
+                {
+                    var viewport = target.WindowSource is { } windowSource
+                        ? new Size(windowSource.SourcePixelWidth, windowSource.SourcePixelHeight)
+                        : OverlayRenderer.CalculateLogicalCanvasSize(target.Plane);
+                    if (OverlaySwipeGesture.ShouldStart(
+                            capture.PressedContentPoint,
+                            currentHit.ContentPoint,
+                            viewport.Width,
+                            viewport.Height))
+                    {
+                        startsSwipe = target.Result is not null
+                            ? target.MaximumScroll > 0.01
+                            : target.WindowSource?.BeginPointerSwipe(capture.PressedContentPoint) == true;
+                    }
+                }
+
                 capture = capture with
                 {
                     LastTexturePoint = currentHit.TexturePoint,
-                    LastContentPoint = currentHit.ContentPoint
+                    LastContentPoint = currentHit.ContentPoint,
+                    LastWorldPoint = currentHit.WorldPoint,
+                    IsSwiping = capture.IsSwiping || startsSwipe
                 };
                 _pointerCapture = capture;
+                if (pressed && capture.IsSwiping)
+                {
+                    var swipeFrom = startsSwipe
+                        ? capture.PressedContentPoint
+                        : previousContentPoint;
+                    var normalizedOffsetDelta = swipeFrom.Y - currentHit.ContentPoint.Y;
+                    if (target.Result is { } result)
+                    {
+                        var viewportHeight = OverlayRenderer.CalculateLogicalCanvasSize(target.Plane).Height;
+                        var offsetDelta = OverlaySwipeGesture.CalculateOffsetDelta(
+                            swipeFrom,
+                            currentHit.ContentPoint,
+                            viewportHeight);
+                        if (result.Scroll(offsetDelta, target.MaximumScroll))
+                        {
+                            target.IsDirty = true;
+                        }
+                    }
+                    else
+                    {
+                        target.WindowSource?.PointerSwipe(normalizedOffsetDelta);
+                    }
+                }
             }
 
             SetPointerVisual(
@@ -1716,20 +3532,69 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                     capture.Hand,
                     capture.LastTexturePoint,
                     capture.LastContentPoint,
-                    pressed));
+                    pressed,
+                    pointerRay,
+                    capture.LastWorldPoint));
             if (!pressed && wasPressed)
             {
-                target.WindowSource?.PointerUp(capture.LastContentPoint);
-                if (target.WindowSource is not null)
+                var toolbarAction = capture.ToolbarAction;
+                var commandButtonRelease =
+                    toolbarAction == OverlayToolbarAction.CustomCommand &&
+                    _toolbarCommandPressOverlayId == capture.OverlayId;
+                var executeToolbarAction = commandButtonRelease ||
+                                           (toolbarAction is { } pendingAction &&
+                                            hit is { } releaseHit &&
+                                             OverlayToolbarLayout.HitTest(
+                                                 target.Kind,
+                                                 target.Plane,
+                                                 releaseHit.TexturePoint,
+                                                 target.ToolbarSide) == pendingAction);
+                bool? windowControlExecuted = null;
+                if (toolbarAction is null)
                 {
-                    target.IsDirty = true;
+                    if (capture.IsSwiping)
+                    {
+                        target.WindowSource?.EndPointerSwipe();
+                        windowControlExecuted = false;
+                    }
+                    else
+                    {
+                        windowControlExecuted = target.WindowSource?.PointerUp(capture.LastContentPoint);
+                    }
                 }
                 _log.Info(
                     $"[pointer] 光标松开对象：Overlay={capture.OverlayId}，手={capture.Hand}，" +
-                    $"UV=({capture.LastContentPoint.X:F3},{capture.LastContentPoint.Y:F3})。");
+                    $"UV=({capture.LastContentPoint.X:F3},{capture.LastContentPoint.Y:F3})，" +
+                    $"工具栏={toolbarAction?.ToString() ?? "None"}，工具栏执行={executeToolbarAction}，" +
+                    $"滑动={capture.IsSwiping}，" +
+                    $"WPF控件={capture.WindowControlName ?? "None"}，" +
+                    $"WPF执行={windowControlExecuted?.ToString() ?? "Native"}。");
                 _pointerCapture = null;
+                if (executeToolbarAction)
+                {
+                    if (commandButtonRelease)
+                    {
+                        _toolbarCommandPressOverlayId = null;
+                        HandleCommandButtonUp(
+                            OverlayCommandButtonSource,
+                            DateTimeOffset.Now,
+                            cancellationToken);
+                    }
+                    else
+                    {
+                        ExecuteToolbarAction(
+                            target,
+                            toolbarAction!.Value,
+                            cancellationToken);
+                    }
+                }
             }
             return;
+        }
+
+        if (hit is null)
+        {
+            _pointerStabilizer.Reset();
         }
 
         SetPointerVisual(
@@ -1739,7 +3604,9 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                     pointerHand.Value,
                     hoverHit.TexturePoint,
                     hoverHit.ContentPoint,
-                    false)
+                    false,
+                    pointerRay,
+                    hoverHit.WorldPoint)
                 : null);
     }
 
@@ -1747,9 +3614,27 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
     {
         if (_pointerCapture is { } capture)
         {
-            FindOverlay(capture.OverlayId)?.WindowSource?.CancelPointer();
+            if (capture.ToolbarAction == OverlayToolbarAction.CustomCommand &&
+                _toolbarCommandPressOverlayId == capture.OverlayId)
+            {
+                CancelToolbarCommandPress("指针交互中断");
+            }
+            else if (capture.ToolbarAction is null)
+            {
+                var windowSource = FindOverlay(capture.OverlayId)?.WindowSource;
+                if (capture.IsSwiping)
+                {
+                    windowSource?.EndPointerSwipe();
+                }
+                else
+                {
+                    windowSource?.CancelPointer();
+                }
+            }
         }
         _pointerCapture = null;
+        _pointerStabilizer.Reset();
+        _pointerRayStabilizer.Reset();
         SetPointerVisual(null, null);
     }
 
@@ -1763,9 +3648,35 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                 continue;
             }
 
+            if (overlay.Pointer is not null && next is null)
+            {
+                overlay.WindowSource?.PointerLeave();
+            }
+            var previousToolbarState = ToolbarPointerState(overlay, overlay.Pointer);
+            var nextToolbarState = ToolbarPointerState(overlay, next);
             overlay.Pointer = next;
-            overlay.IsDirty = true;
+            if (previousToolbarState != nextToolbarState)
+            {
+                overlay.IsChromeDirty = true;
+            }
         }
+    }
+
+    private (OverlayToolbarAction? Action, bool Pressed) ToolbarPointerState(
+        InteractiveOverlay overlay,
+        OverlayPointerVisual? pointer)
+    {
+        if (!IsToolbarVisible(overlay) || pointer is not { } value)
+        {
+            return (null, false);
+        }
+
+        var action = OverlayToolbarLayout.HitTest(
+            overlay.Kind,
+            overlay.Plane,
+            value.TexturePoint,
+            overlay.ToolbarSide);
+        return (action, action is not null && value.IsPressed);
     }
 
     private static bool PointerVisualEquals(
@@ -1780,7 +3691,34 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         return left.Value.Hand == right.Value.Hand &&
                left.Value.IsPressed == right.Value.IsPressed &&
                MathF.Abs(left.Value.TexturePoint.X - right.Value.TexturePoint.X) * OverlayRenderer.Width < 0.75f &&
-               MathF.Abs(left.Value.TexturePoint.Y - right.Value.TexturePoint.Y) * OverlayRenderer.Height < 0.75f;
+               MathF.Abs(left.Value.TexturePoint.Y - right.Value.TexturePoint.Y) * OverlayRenderer.Height < 0.75f &&
+               PointerWorldPointEquals(left.Value.WorldPoint, right.Value.WorldPoint) &&
+               PointerRayEquals(left.Value.Ray, right.Value.Ray);
+    }
+
+    private static bool PointerWorldPointEquals(Vector3f? left, Vector3f? right)
+    {
+        if (left is null || right is null)
+        {
+            return left is null && right is null;
+        }
+
+        return (left.Value - right.Value).LengthSquared < 0.000001f;
+    }
+
+    private static bool PointerRayEquals(
+        OverlayPointerRayVisual? left,
+        OverlayPointerRayVisual? right)
+    {
+        if (left is null || right is null)
+        {
+            return left is null && right is null;
+        }
+
+        const float toleranceSquared = 0.000001f;
+        return (left.Value.Source - right.Value.Source).LengthSquared < toleranceSquared &&
+               (left.Value.Target - right.Value.Target).LengthSquared < toleranceSquared &&
+               (left.Value.Viewer - right.Value.Viewer).LengthSquared < toleranceSquared;
     }
 
     private static ETrackedControllerRole? Opposite(ETrackedControllerRole? hand) => hand switch
@@ -1790,6 +3728,41 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         _ => null
     };
 
+    private OverlayGrab? UpdateGrabForHand(
+        ETrackedControllerRole hand,
+        bool gripPressed,
+        TrackedHandPose? pose,
+        ETrackingUniverseOrigin origin)
+    {
+        if (!_grabs.TryGet(hand, out var grab))
+        {
+            return null;
+        }
+
+        var overlay = FindOverlay(grab.OverlayId);
+        if (!gripPressed || pose is null || overlay is null)
+        {
+            _grabs.Release(hand, out _);
+            _log.Info($"[interaction] 释放空间对象：Overlay={grab.OverlayId}，手={hand}。");
+            if (overlay is not null)
+            {
+                overlay.IsChromeDirty = true;
+                overlay.WindowSource?.SetHoldingHand(null);
+            }
+            if (_pointerCapture is { ToolbarAction: not null } toolbarCapture &&
+                toolbarCapture.OverlayId == grab.OverlayId)
+            {
+                ResetOverlayPointer();
+            }
+            MarkGrabbedOverlaysDirty();
+            return grab;
+        }
+
+        overlay.Plane = SpatialOverlayInteraction.Move(grab, pose.Value);
+        _spatialOverlayManager?.UpdateTransform(overlay.Id, overlay.Plane, origin);
+        return null;
+    }
+
     private void BeginGrab(long overlayId, ETrackedControllerRole hand, TrackedHandPose pose)
     {
         var overlay = FindOverlay(overlayId);
@@ -1798,9 +3771,15 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             return;
         }
 
-        _grab = new OverlayGrab(overlayId, hand, overlay.Plane, pose);
-        _interactionContactHand = hand;
-        SetInteractionTarget(overlayId);
+        if (!_grabs.TryBegin(new OverlayGrab(overlayId, hand, overlay.Plane, pose)))
+        {
+            return;
+        }
+
+        overlay.ToolbarSide = OverlayToolbarPlacement.OppositeHoldingHand(hand);
+        overlay.WindowSource?.SetHoldingHand(hand);
+        overlay.IsChromeDirty = true;
+        MarkGrabbedOverlaysDirty();
         if (hand == ETrackedControllerRole.LeftHand)
         {
             PulseLeft(0.035f, 105f, 0.35f);
@@ -1812,11 +3791,221 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         _log.Info($"[interaction] 抓取空间对象：Overlay={overlayId}，手={hand}。");
     }
 
+    private bool IsToolbarVisible(InteractiveOverlay overlay) =>
+        overlay.ShowToolbarWhenGrabbed &&
+        _grabs.ContainsOverlay(overlay.Id);
+
+    private void MarkGrabbedOverlaysDirty()
+    {
+        foreach (var grab in _grabs.Active)
+        {
+            if (FindOverlay(grab.OverlayId) is { } overlay)
+            {
+                overlay.IsChromeDirty = true;
+            }
+        }
+    }
+
+    private void ExecuteToolbarAction(
+        InteractiveOverlay overlay,
+        OverlayToolbarAction action,
+        CancellationToken cancellationToken)
+    {
+        if (_grabs.HasMultiple)
+        {
+            Publish(L("Interaction.MultipleNoAction"), SelectionState.Idle, true);
+            return;
+        }
+
+        if (action == OverlayToolbarAction.Translate)
+        {
+            StartDirectToolbarTranslation(
+                overlay,
+                AssistantRequestMode.Translate,
+                cancellationToken);
+            return;
+        }
+        if (action == OverlayToolbarAction.LayoutTranslate)
+        {
+            StartDirectToolbarTranslation(
+                overlay,
+                AssistantRequestMode.LayoutTranslate,
+                cancellationToken);
+            return;
+        }
+        if (action == OverlayToolbarAction.CustomCommand)
+        {
+            return;
+        }
+
+        if (action == OverlayToolbarAction.Close)
+        {
+            RemoveInteractiveOverlay(overlay.Id, "工具栏关闭");
+            return;
+        }
+
+        if (overlay.Kind != InteractiveOverlayKind.Result ||
+            overlay.Result?.Snapshot() is not { } snapshot)
+        {
+            Publish(L("Osc.TextOnly"), SelectionState.Idle, true);
+            return;
+        }
+
+        if (snapshot.Status == ResultStatus.Streaming)
+        {
+            Publish(L("Osc.StillGenerating"), SelectionState.Idle, true);
+            return;
+        }
+
+        if (snapshot.Status == ResultStatus.Error || string.IsNullOrWhiteSpace(snapshot.VisibleText))
+        {
+            Publish(L("Osc.NoText"), SelectionState.Idle, true);
+            return;
+        }
+
+        if (_toolbarOscTask is { IsCompleted: false })
+        {
+            Publish(L("Osc.Busy"), SelectionState.Idle, true);
+            return;
+        }
+
+        _toolbarOscTask = SendResultOverlayToOscAsync(
+            overlay.Id,
+            snapshot.VisibleText,
+            _cancellation?.Token ?? CancellationToken.None);
+    }
+
+    private void StartDirectToolbarTranslation(
+        InteractiveOverlay overlay,
+        AssistantRequestMode mode,
+        CancellationToken cancellationToken)
+    {
+        if (overlay is not { Kind: InteractiveOverlayKind.Capture, Capture: not null })
+        {
+            Publish(L("Translation.CaptureOnly"), SelectionState.Idle, true);
+            return;
+        }
+        if (_commandPress.IsPressed)
+        {
+            Publish(L("Command.RecordingInProgress"), SelectionState.Idle, true);
+            return;
+        }
+
+        _commandTargetOverlayId = overlay.Id;
+        _pendingSubmissionMode = mode;
+        _commandRecordingError = null;
+        _log.Info(
+            $"[toolbar] 单击启动翻译：Overlay={overlay.Id}，模式={mode}。");
+        StartTranslationForCommandTarget(cancellationToken);
+    }
+
+    private void CancelToolbarCommandPress(string reason)
+    {
+        if (_toolbarCommandPressOverlayId is null)
+        {
+            return;
+        }
+
+        CancelSingleOverlayCommand(reason);
+    }
+
+    private void CancelSingleOverlayCommand(string reason)
+    {
+        var hadPendingCommand = _commandPress.IsPressed ||
+                                _commandTargetOverlayId is not null ||
+                                _toolbarCommandPressOverlayId is not null;
+        var targetOverlayId = _commandTargetOverlayId ?? _toolbarCommandPressOverlayId;
+
+        _toolbarCommandPressOverlayId = null;
+        _commandTargetOverlayId = null;
+        SetCommandRecording(targetOverlayId, false);
+        _commandPress.Reset();
+        _pendingSubmissionMode = AssistantRequestMode.Translate;
+        _commandRecordingError = null;
+        if (hadPendingCommand && _commandRecorder.IsRecording)
+        {
+            _ = CancelToolbarCommandRecordingAsync(reason);
+        }
+        if (hadPendingCommand)
+        {
+            _log.Info($"[interaction] 已取消单窗口命令：原因={reason}。");
+        }
+    }
+
+    private void SetCommandRecording(long? overlayId, bool isRecording)
+    {
+        if (overlayId is null || FindOverlay(overlayId.Value) is not { } overlay ||
+            overlay.IsCommandRecording == isRecording)
+        {
+            return;
+        }
+
+        overlay.IsCommandRecording = isRecording;
+        overlay.IsChromeDirty = true;
+        overlay.SynchronizeChromeTextureBuffers = true;
+    }
+
+    private async Task CancelToolbarCommandRecordingAsync(string reason)
+    {
+        try
+        {
+            await _commandRecorder.CancelAsync(CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            _log.Error($"取消截图工具栏语音命令录音失败：{reason}。", exception);
+        }
+    }
+
+    private async Task SendResultOverlayToOscAsync(
+        long overlayId,
+        string text,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var chunkCount = TextChunker.Split(
+                text,
+                _configuration.VrChatVoiceInput.MaxChatboxCharacters).Count;
+            _log.Info(
+                $"[toolbar] 开始发送文本结果：Overlay={overlayId}，" +
+                $"目标={_configuration.VrChatVoiceInput.Host}:{_configuration.VrChatVoiceInput.Port}，" +
+                $"字符={text.Length}，分段={chunkCount}，" +
+                $"分段间隔={_configuration.VrChatVoiceInput.StreamingChunkIntervalMilliseconds} ms，" +
+                $"文本={PreviewText(text)}");
+            Publish(
+                chunkCount > 1
+                    ? LF("Osc.SendingChunks", chunkCount)
+                    : L("Osc.Sending"),
+                SelectionState.Idle);
+            _vrChatOscOutput ??= new VrChatOscOutput(_configuration.VrChatVoiceInput);
+            await _vrChatOscOutput.SendAsync(text, cancellationToken);
+            _log.Info(
+                $"[toolbar] 文本结果 OSC 发送完成：Overlay={overlayId}，" +
+                $"字符={text.Length}，分段={chunkCount}。");
+            Publish(L("Osc.Sent"), SelectionState.Idle);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            _log.Info($"[toolbar] 文本结果 OSC 发送已取消：Overlay={overlayId}。");
+        }
+        catch (Exception exception)
+        {
+            _log.Error($"[toolbar] 文本结果 OSC 发送失败：Overlay={overlayId}。", exception);
+            Publish(LF("Osc.Failed", exception.Message), SelectionState.Idle, true);
+        }
+    }
+
     private OverlayContact? FindContact(Vector3f position)
     {
         OverlayContact? closest = null;
         foreach (var overlay in _interactiveOverlays)
         {
+            if (overlay.IsPresentationDeferred)
+            {
+                continue;
+            }
+
             if (!SpatialOverlayInteraction.TryContact(overlay.Plane, position, out var distance))
             {
                 continue;
@@ -1831,61 +4020,92 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         return closest;
     }
 
-    private static OverlayContact? Closest(OverlayContact? left, OverlayContact? right)
-    {
-        if (left is null)
-        {
-            return right;
-        }
-        if (right is null)
-        {
-            return left;
-        }
-        return left.Value.Distance <= right.Value.Distance ? left : right;
-    }
-
     private void UpdateResultControls()
     {
+        var clickPressed = ReadDigital(_resultClickActionHandle);
         if (_interactiveOverlays.Count == 0)
         {
-            _lastResultClickPressed = false;
+            if (_overlayCloseHold.IsPressed)
+            {
+                CancelOverlayCloseHold("没有可关闭的空间对象", suppressRelease: true);
+            }
+            if (!clickPressed)
+            {
+                _suppressResultClickRelease = false;
+            }
+            _lastResultClickPressed = clickPressed;
             _lastScrollTargetOverlayId = null;
             _resultScrollBoundary = ResultScrollBoundary.None;
             _wpfWheelAccumulator = 0;
             return;
         }
 
-        var clickPressed = ReadDigital(_resultClickActionHandle);
         var now = DateTimeOffset.Now;
         var elapsed = _lastResultScrollAt == default
             ? TimeSpan.Zero
             : now - _lastResultScrollAt;
         _lastResultScrollAt = now;
         var canControl = !_interactiveOverlaysSuppressed && _selection.Snapshot.State == SelectionState.Idle;
+        if (!canControl && _overlayCloseHold.IsPressed)
+        {
+            CancelOverlayCloseHold("空间对象当前不可交互", suppressRelease: true);
+        }
+
         if (canControl && clickPressed && !_lastResultClickPressed)
         {
-            _spatialOverlaysVisible = !_spatialOverlaysVisible;
-            if (_spatialOverlaysVisible)
+            var closeTarget = _spatialOverlaysVisible ? ResolveInteractionTarget() : null;
+            _overlayCloseHold.Press(closeTarget?.Id, now);
+            _suppressResultClickRelease = false;
+            if (closeTarget is not null)
             {
-                foreach (var overlay in _interactiveOverlays)
-                {
-                    overlay.IsDirty = true;
-                }
-                RenderInteractiveOverlays(force: true);
+                SetOverlayCloseHoldProgress(closeTarget.Id, 0);
+                _log.Info(
+                    $"[interaction] 开始长按关闭空间对象：Overlay={closeTarget.Id}，阈值=" +
+                    $"{SingleOverlayCloseHoldDuration.TotalMilliseconds:F0}ms。");
+            }
+        }
+
+        if (canControl && clickPressed && _overlayCloseHold.IsPressed &&
+            _overlayCloseHold.OverlayId is { } closeTargetId)
+        {
+            var currentTarget = _spatialOverlaysVisible ? ResolveInteractionTarget() : null;
+            if (currentTarget?.Id != closeTargetId)
+            {
+                CancelOverlayCloseHold("目标窗口已松开", suppressRelease: true);
             }
             else
             {
-                SetInteractionTarget(null);
-                _interactionContactHand = null;
-                _grab = null;
-                ResetOverlayPointer();
-                HideInteractiveOverlays();
+                var update = _overlayCloseHold.Update(now);
+                SetOverlayCloseHoldProgress(closeTargetId, update.Progress);
+                if (update.CompletedNow)
+                {
+                    PulseRight(0.08f, 55f, 0.65f);
+                    RemoveInteractiveOverlay(closeTargetId, "右摇杆长按关闭");
+                }
             }
-            PulseRight(0.035f, 100f, 0.3f);
-            _log.Info($"[interaction] 右摇杆切换全局空间对象：显示={_spatialOverlaysVisible}。");
-            Publish(
-                _spatialOverlaysVisible ? "已显示空间对象和手柄。" : "已隐藏空间对象和手柄。",
-                SelectionState.Idle);
+        }
+
+        if (!clickPressed && _lastResultClickPressed)
+        {
+            if (_suppressResultClickRelease)
+            {
+                _suppressResultClickRelease = false;
+                _overlayCloseHold.Reset();
+            }
+            else
+            {
+                var release = _overlayCloseHold.Release();
+                SetOverlayCloseHoldProgress(release.OverlayId, null);
+                if (canControl && release.OverlayId is null && !release.Completed)
+                {
+                    ToggleSpatialOverlayVisibility();
+                }
+                else if (release.OverlayId is not null && !release.Completed)
+                {
+                    _log.Info(
+                        $"[interaction] 长按关闭已取消：Overlay={release.OverlayId}，原因=右摇杆提前松开。");
+                }
+            }
         }
 
         _lastResultClickPressed = clickPressed;
@@ -1916,7 +4136,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
 
         var delta = ResultScrollMath.CalculateDelta(
             scroll.y,
-            _configuration.InvertResultScroll,
+            Volatile.Read(ref _invertResultScroll),
             elapsed);
         if (scrollTarget.WindowSource is { } windowSource)
         {
@@ -1962,6 +4182,68 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         }
     }
 
+    private void ToggleSpatialOverlayVisibility()
+    {
+        _spatialOverlaysVisible = !_spatialOverlaysVisible;
+        if (_spatialOverlaysVisible)
+        {
+            RenderInteractiveOverlays();
+        }
+        else
+        {
+            SetContactHighlights(null, null);
+            SetInteractionTarget(null);
+            _interactionContactHand = null;
+            _grabs.Clear();
+            ResetOverlayPointer();
+            HideInteractiveOverlays();
+        }
+
+        PulseRight(0.035f, 100f, 0.3f);
+        _log.Info($"[interaction] 右摇杆切换全局空间对象：显示={_spatialOverlaysVisible}。");
+        Publish(
+            _spatialOverlaysVisible ? L("Interaction.Visible") : L("Interaction.Hidden"),
+            SelectionState.Idle);
+    }
+
+    private void CancelOverlayCloseHold(string reason, bool suppressRelease)
+    {
+        var overlayId = _overlayCloseHold.OverlayId;
+        var wasPressed = _overlayCloseHold.IsPressed;
+        SetOverlayCloseHoldProgress(overlayId, null);
+        _overlayCloseHold.Reset();
+        if (wasPressed && suppressRelease)
+        {
+            _suppressResultClickRelease = true;
+        }
+        if (overlayId is not null)
+        {
+            _log.Info($"[interaction] 长按关闭已取消：Overlay={overlayId}，原因={reason}。");
+        }
+    }
+
+    private void SetOverlayCloseHoldProgress(long? overlayId, double? progress)
+    {
+        if (overlayId is null || FindOverlay(overlayId.Value) is not { } overlay)
+        {
+            return;
+        }
+
+        double? normalized = progress is null ? null : Math.Clamp(progress.Value, 0, 1);
+        if (overlay.CloseHoldProgress is null && normalized is null)
+        {
+            return;
+        }
+        if (overlay.CloseHoldProgress is { } previous && normalized is { } next &&
+            Math.Abs(previous - next) < 0.001)
+        {
+            return;
+        }
+
+        overlay.CloseHoldProgress = normalized;
+        overlay.IsProgressDirty = true;
+    }
+
     private void UpdateSelectionManagerHint(
         SpatialSelectionPlane? plane,
         bool bothTriggersPressed,
@@ -1972,17 +4254,26 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             return;
         }
 
-        var usable = value.HasUsableOrientation;
-        if (usable == _lastSelectionOrientationUsable)
+        var usable = value.IsUsable;
+        if (usable == _lastSelectionPlaneUsable)
         {
             return;
         }
 
-        _lastSelectionOrientationUsable = usable;
+        _lastSelectionPlaneUsable = usable;
         Publish(
             usable
-                ? "角度已恢复；继续调整范围，松开任一扳机立即捕获。"
-                : $"角度过大：视线夹角 {value.ViewAngleDegrees:F0}°，需小于 {SpatialSelectionPlane.MaximumViewAngleDegrees:F0}°。",
+                ? L("Overlay.Selection.Restored")
+                : !value.HasUsableDimensions
+                    ? LF(
+                        "Overlay.Selection.TooNarrowStatus",
+                        value.Width * 100,
+                        value.Height * 100,
+                        SpatialSelectionPlane.MinimumWidthMeters * 100)
+                    : LF(
+                        "Overlay.Selection.AngleStatus",
+                        value.ViewAngleDegrees,
+                        SpatialSelectionPlane.MaximumViewAngleDegrees),
             state,
             !usable);
     }
@@ -2001,12 +4292,37 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             return;
         }
 
-        var frameUsable = _currentPlane?.HasUsableOrientation ?? true;
-        if (SetSelectionOverlayImage(_renderer.RenderSelection(snapshot, frameUsable)))
+        var invalidHint = SelectionInvalidHint(_currentPlane, snapshot.State);
+        var frameUsable = invalidHint is null;
+        if (SetSelectionOverlayImage(
+                _renderer.RenderSelection(snapshot, frameUsable, invalidHint)))
         {
             _lastRenderedSnapshot = snapshot;
             _lastRenderAt = now;
         }
+    }
+
+    private static string? SelectionInvalidHint(
+        SpatialSelectionPlane? plane,
+        SelectionState state)
+    {
+        if (state != SelectionState.Sizing)
+        {
+            return null;
+        }
+        if (plane is not { } value)
+        {
+            return L("Overlay.Selection.TrackingUnavailable");
+        }
+        if (!value.HasUsableDimensions)
+        {
+            return LF(
+                "Overlay.Selection.TooNarrow",
+                SpatialSelectionPlane.MinimumWidthMeters * 100);
+        }
+        return value.HasUsableOrientation
+            ? null
+            : L("Overlay.Selection.Angle");
     }
 
     private bool SetSelectionOverlayImage(byte[] image)
@@ -2034,7 +4350,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
     {
         _currentPlane = null;
         _lockedPlane = null;
-        _lastSelectionOrientationUsable = true;
+        _lastSelectionPlaneUsable = true;
         SetHeadLockedSelectionOverlayTransform();
         ResetSelectionOverlayImage(_renderer.RenderSelection(snapshot));
         _lastRenderedSnapshot = snapshot;
@@ -2059,8 +4375,19 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         var origin = CurrentTrackingOrigin();
         foreach (var overlay in _interactiveOverlays)
         {
+            if (overlay.IsPresentationDeferred)
+            {
+                _spatialOverlayManager.Hide(overlay.Id);
+                overlay.IsShown = false;
+                continue;
+            }
+
             _spatialOverlayManager.UpdateTransform(overlay.Id, overlay.Plane, origin);
+            UpdateDirectVideoTransform(overlay, origin);
             RenderInteractiveOverlay(overlay, force, now);
+            RenderInteractiveChrome(overlay, origin, force);
+            RenderInteractiveProgress(overlay, origin, force);
+            UpdateInteractivePointer(overlay, origin);
             _spatialOverlayManager.Show(overlay.Id);
             overlay.IsShown = true;
         }
@@ -2082,67 +4409,190 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         DateTimeOffset? renderAt = null)
     {
         var now = renderAt ?? DateTimeOffset.Now;
-        var minimumInterval = overlay.WindowSource?.FrameInterval ?? TimeSpan.FromMilliseconds(33);
-        if (_spatialOverlayManager is null ||
-            (!force && now - overlay.LastRenderAt < minimumInterval) ||
-            (!force && !overlay.IsDirty && overlay.WindowSource is null))
+        var minimumInterval = overlay.WindowSource?.FrameInterval ??
+                              TimeSpan.FromSeconds(1d / RuntimeFramesPerSecond);
+        var windowNeedsRender = overlay.WindowSource?.NeedsRender == true;
+        var directPixelsNeedRender = overlay.WindowSource?.NeedsDirectPixelRender == true;
+        if (_spatialOverlayManager is null)
         {
             return;
         }
+        if (!force && !overlay.SynchronizeTextureBuffers)
+        {
+            if (!overlay.IsDirty && !windowNeedsRender && !directPixelsNeedRender)
+            {
+                return;
+            }
+            if (now - overlay.LastRenderAt + WpfFrameIntervalTolerance < minimumInterval)
+            {
+                return;
+            }
+        }
 
-        var highlighted = _interactionTargetOverlayId == overlay.Id;
         if (overlay.Kind == InteractiveOverlayKind.Capture && overlay.Capture is { } capture)
         {
+            var frame = _renderer.RenderCapture(
+                capture.ImageBytes,
+                overlay.Plane,
+                overlay.IsHighlighted);
             _spatialOverlayManager.UpdatePixels(
                 overlay.Id,
-                _renderer.RenderCapture(
-                    capture.ImageBytes,
-                    overlay.Plane,
-                    highlighted,
-                    overlay.Pointer));
+                frame.Pixels,
+                frame.PixelWidth,
+                frame.PixelHeight,
+                overlay.SynchronizeTextureBuffers);
             overlay.RenderCount++;
             if (force || overlay.RenderCount == 1)
             {
                 _log.Info(
                     $"{DiagnosticTag()} [overlay] 截图层已渲染：Overlay={overlay.Id}，" +
-                    $"次数={overlay.RenderCount}，高亮={highlighted}，强制={force}");
+                    $"纹理={frame.PixelWidth}x{frame.PixelHeight}，次数={overlay.RenderCount}，" +
+                    $"强制={force}");
             }
         }
         else if (overlay.Result?.Snapshot() is { } snapshot)
         {
+            var frameStartedAt = Stopwatch.GetTimestamp();
             var frame = _renderer.RenderResults(
                 snapshot,
                 overlay.Plane,
-                highlighted,
-                overlay.Pointer);
-            _spatialOverlayManager.UpdatePixels(overlay.Id, frame.Pixels);
+                overlay.IsHighlighted,
+                cacheOwner: overlay);
+            var rasterizeDuration = Stopwatch.GetElapsedTime(frameStartedAt);
+            var uploadStartedAt = Stopwatch.GetTimestamp();
+            _spatialOverlayManager.UpdatePixels(
+                overlay.Id,
+                frame.Pixels,
+                frame.PixelWidth,
+                frame.PixelHeight,
+                overlay.SynchronizeTextureBuffers);
+            var uploadDuration = Stopwatch.GetElapsedTime(uploadStartedAt);
             overlay.MaximumScroll = frame.MaximumScrollOffset;
             overlay.Result.ClampScroll(overlay.MaximumScroll);
             overlay.RenderCount++;
+            ResultOverlayFrameRendered?.Invoke(
+                this,
+                new ResultOverlayFrameRenderedEventArgs(
+                    overlay.Id,
+                    snapshot.ContentFormat,
+                    snapshot.Chat is not null,
+                    frame.PixelWidth,
+                    frame.PixelHeight,
+                    rasterizeDuration,
+                    uploadDuration,
+                    Stopwatch.GetElapsedTime(frameStartedAt),
+                    now));
             if (force || overlay.RenderCount == 1 || overlay.RenderCount % 10 == 0)
             {
                 _log.Info(
                     $"{DiagnosticTag()} [overlay] 结果层已渲染：Overlay={overlay.Id}，" +
                     $"次数={overlay.RenderCount}，请求={snapshot.RequestId}，" +
                     $"状态={snapshot.Status}，字符={snapshot.Text.Length}，" +
-                    $"滚动={snapshot.ScrollOffset:F0}，高亮={highlighted}，强制={force}");
+                    $"纹理={frame.PixelWidth}x{frame.PixelHeight}，" +
+                    $"滚动={snapshot.ScrollOffset:F0}，强制={force}");
             }
         }
         else if (overlay.WindowSource is { } windowSource)
         {
-            _spatialOverlayManager.UpdatePixels(
-                overlay.Id,
-                _renderer.RenderWindow(
-                    windowSource,
-                    overlay.Plane,
-                    highlighted,
-                    overlay.Pointer));
-            overlay.RenderCount++;
-            if (force || overlay.RenderCount == 1 || overlay.RenderCount % 300 == 0)
+            var rendered = false;
+            if (windowSource.HasDirectPixelSource &&
+                (force || directPixelsNeedRender) &&
+                windowSource.TryGetLatestDirectPixelFrame(out var directFrame))
             {
-                _log.Info(
-                    $"[overlay] WPF 窗口层已渲染：Overlay={overlay.Id}，" +
-                    $"名称={windowSource.Options.Name}，次数={overlay.RenderCount}。");
+                var uploadStartedAt = Stopwatch.GetTimestamp();
+                if (directFrame.Format == DirectOverlayPixelFormat.Bgra)
+                {
+                    _spatialOverlayManager.UpdateLayerBgraPixels(
+                        overlay.Id,
+                        SpatialOverlayLayer.Video,
+                        directFrame.Pixels,
+                        directFrame.Width,
+                        directFrame.Height,
+                        overlay.SynchronizeVideoTextureBuffers);
+                }
+                else
+                {
+                    _spatialOverlayManager.UpdateLayerPixels(
+                        overlay.Id,
+                        SpatialOverlayLayer.Video,
+                        directFrame.Pixels,
+                        directFrame.Width,
+                        directFrame.Height,
+                        overlay.SynchronizeVideoTextureBuffers);
+                }
+                var uploadDuration = Stopwatch.GetElapsedTime(uploadStartedAt);
+                windowSource.MarkDirectPixelFrameRendered(directFrame.Sequence);
+                overlay.SynchronizeVideoTextureBuffers = false;
+                overlay.RenderCount++;
+                rendered = true;
+                WpfOverlayFrameRendered?.Invoke(
+                    this,
+                    new WpfOverlayFrameRenderedEventArgs(
+                        overlay.Id,
+                        windowSource.Options.Name,
+                        directFrame.Width,
+                        directFrame.Height,
+                        TimeSpan.Zero,
+                        uploadDuration,
+                        uploadDuration,
+                        now,
+                        isDirectPixels: true));
+                if (force || overlay.RenderCount == 1 || overlay.RenderCount % 300 == 0)
+                {
+                    _log.Info(
+                        $"[overlay] 直传视频层已更新：Overlay={overlay.Id}，" +
+                        $"名称={windowSource.Options.Name}，纹理={directFrame.Width}x{directFrame.Height}，" +
+                        $"次数={overlay.RenderCount}。");
+                }
+            }
+
+            if (!windowSource.HasDirectPixelSource ||
+                force ||
+                overlay.IsDirty ||
+                windowNeedsRender ||
+                overlay.SynchronizeTextureBuffers)
+            {
+                var frameStartedAt = Stopwatch.GetTimestamp();
+                var frame = _renderer.RenderWindow(
+                    windowSource,
+                    overlay.Plane);
+                var rasterizeDuration = Stopwatch.GetElapsedTime(frameStartedAt);
+                var uploadStartedAt = Stopwatch.GetTimestamp();
+                var synchronizeWindowBuffers = overlay.SynchronizeTextureBuffers |
+                                               windowSource.ConsumeBufferSynchronizationRequest();
+                _spatialOverlayManager.UpdatePixels(
+                    overlay.Id,
+                    frame.Pixels,
+                    frame.PixelWidth,
+                    frame.PixelHeight,
+                    synchronizeWindowBuffers);
+                var uploadDuration = Stopwatch.GetElapsedTime(uploadStartedAt);
+                overlay.RenderCount++;
+                rendered = true;
+                WpfOverlayFrameRendered?.Invoke(
+                    this,
+                    new WpfOverlayFrameRenderedEventArgs(
+                        overlay.Id,
+                        windowSource.Options.Name,
+                        frame.PixelWidth,
+                        frame.PixelHeight,
+                        rasterizeDuration,
+                        uploadDuration,
+                        Stopwatch.GetElapsedTime(frameStartedAt),
+                        now));
+                CompletePendingDiagnosticWpfInteractions(overlay.Id, Stopwatch.GetTimestamp());
+                if (force || overlay.RenderCount == 1 || overlay.RenderCount % 300 == 0)
+                {
+                    _log.Info(
+                        $"[overlay] WPF 窗口层已渲染：Overlay={overlay.Id}，" +
+                        $"名称={windowSource.Options.Name}，纹理={frame.PixelWidth}x{frame.PixelHeight}，" +
+                        $"次数={overlay.RenderCount}。");
+                }
+            }
+
+            if (!rendered)
+            {
+                return;
             }
         }
         else
@@ -2151,7 +4601,198 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         }
 
         overlay.IsDirty = false;
+        overlay.SynchronizeTextureBuffers = false;
         overlay.LastRenderAt = now;
+    }
+
+    private void UpdateDirectVideoTransform(
+        InteractiveOverlay overlay,
+        ETrackingUniverseOrigin origin)
+    {
+        if (_spatialOverlayManager is null ||
+            overlay.WindowSource is not { HasDirectPixelSource: true } windowSource)
+        {
+            return;
+        }
+
+        var videoPlane = SpatialQuadOverlayMath.CreateChildPlane(
+            overlay.Plane,
+            windowSource.DirectPixelRegion,
+            VideoLayerOffset);
+        _spatialOverlayManager.UpdateLayerTransform(
+            overlay.Id,
+            SpatialOverlayLayer.Video,
+            videoPlane,
+            origin);
+        _spatialOverlayManager.ShowLayer(overlay.Id, SpatialOverlayLayer.Video);
+    }
+
+    private void RenderInteractiveChrome(
+        InteractiveOverlay overlay,
+        ETrackingUniverseOrigin origin,
+        bool force)
+    {
+        if (_spatialOverlayManager is null)
+        {
+            return;
+        }
+
+        var showToolbar = IsToolbarVisible(overlay);
+        var shouldShow = showToolbar || overlay.IsCommandRecording;
+        if (!shouldShow)
+        {
+            _spatialOverlayManager.HideLayer(overlay.Id, SpatialOverlayLayer.Chrome);
+            overlay.IsChromeDirty = false;
+            return;
+        }
+
+        if (force || overlay.IsChromeDirty || overlay.SynchronizeChromeTextureBuffers)
+        {
+            var frame = _renderer.RenderChrome(
+                overlay.Kind,
+                overlay.Plane,
+                showToolbar,
+                overlay.Pointer,
+                overlay.IsCommandRecording,
+                overlay.ToolbarSide);
+            _spatialOverlayManager.UpdateLayerPixels(
+                overlay.Id,
+                SpatialOverlayLayer.Chrome,
+                frame.Pixels,
+                frame.PixelWidth,
+                frame.PixelHeight,
+                overlay.SynchronizeChromeTextureBuffers);
+            overlay.IsChromeDirty = false;
+            overlay.SynchronizeChromeTextureBuffers = false;
+        }
+
+        _spatialOverlayManager.UpdateLayerTransform(
+            overlay.Id,
+            SpatialOverlayLayer.Chrome,
+            SpatialQuadOverlayMath.OffsetPlane(overlay.Plane, ChromeLayerOffset),
+            origin);
+        _spatialOverlayManager.ShowLayer(overlay.Id, SpatialOverlayLayer.Chrome);
+    }
+
+    private void RenderInteractiveProgress(
+        InteractiveOverlay overlay,
+        ETrackingUniverseOrigin origin,
+        bool force)
+    {
+        if (_spatialOverlayManager is null)
+        {
+            return;
+        }
+
+        if (overlay.CloseHoldProgress is not { } progress)
+        {
+            _spatialOverlayManager.HideLayer(overlay.Id, SpatialOverlayLayer.Progress);
+            overlay.IsProgressDirty = false;
+            return;
+        }
+
+        if (force || overlay.IsProgressDirty || overlay.SynchronizeProgressTextureBuffers)
+        {
+            var frame = _renderer.RenderCloseHoldProgress(overlay.Plane, progress);
+            _spatialOverlayManager.UpdateLayerPixels(
+                overlay.Id,
+                SpatialOverlayLayer.Progress,
+                frame.Pixels,
+                frame.PixelWidth,
+                frame.PixelHeight,
+                overlay.SynchronizeProgressTextureBuffers);
+            overlay.IsProgressDirty = false;
+            overlay.SynchronizeProgressTextureBuffers = false;
+        }
+
+        var progressPlane = SpatialQuadOverlayMath.CreateSquareChildPlane(
+            overlay.Plane,
+            new NormalizedPoint(0.5f, 0.5f),
+            OverlayRenderer.CalculateCloseHoldProgressLogicalExtent(overlay.Plane),
+            ProgressLayerOffset);
+        _spatialOverlayManager.UpdateLayerTransform(
+            overlay.Id,
+            SpatialOverlayLayer.Progress,
+            progressPlane,
+            origin);
+        _spatialOverlayManager.ShowLayer(overlay.Id, SpatialOverlayLayer.Progress);
+    }
+
+    private void UpdateInteractivePointer(
+        InteractiveOverlay overlay,
+        ETrackingUniverseOrigin origin)
+    {
+        if (_spatialOverlayManager is null)
+        {
+            return;
+        }
+
+        if (overlay.Pointer is not { } pointer)
+        {
+            _spatialOverlayManager.HideLayer(overlay.Id, SpatialOverlayLayer.Ray);
+            _spatialOverlayManager.HideLayer(overlay.Id, SpatialOverlayLayer.Pointer);
+            return;
+        }
+
+        if (_configuration.ShowPointerRay &&
+            pointer.Ray is { } ray &&
+            SpatialQuadOverlayMath.TryCreateRayPlane(
+                ray.Source,
+                ray.Target,
+                ray.Viewer,
+                OverlayRenderer.PointerRayThicknessMeters,
+                out var rayPlane))
+        {
+            if (overlay.SynchronizeRayTextureBuffers)
+            {
+                var rayFrame = _renderer.RenderPointerRay();
+                _spatialOverlayManager.UpdateLayerPixels(
+                    overlay.Id,
+                    SpatialOverlayLayer.Ray,
+                    rayFrame.Pixels,
+                    rayFrame.PixelWidth,
+                    rayFrame.PixelHeight,
+                    synchronizeBuffers: true);
+                overlay.SynchronizeRayTextureBuffers = false;
+            }
+            _spatialOverlayManager.UpdateLayerTransform(
+                overlay.Id,
+                SpatialOverlayLayer.Ray,
+                rayPlane,
+                origin);
+            _spatialOverlayManager.ShowLayer(overlay.Id, SpatialOverlayLayer.Ray);
+        }
+        else
+        {
+            _spatialOverlayManager.HideLayer(overlay.Id, SpatialOverlayLayer.Ray);
+        }
+
+        var pointerStateChanged = overlay.RenderedPointerPressed != pointer.IsPressed;
+        if (overlay.SynchronizePointerTextureBuffers || pointerStateChanged)
+        {
+            var frame = _renderer.RenderPointer(pointer.IsPressed);
+            _spatialOverlayManager.UpdateLayerPixels(
+                overlay.Id,
+                SpatialOverlayLayer.Pointer,
+                frame.Pixels,
+                frame.PixelWidth,
+                frame.PixelHeight,
+                overlay.SynchronizePointerTextureBuffers || pointerStateChanged);
+            overlay.SynchronizePointerTextureBuffers = false;
+            overlay.RenderedPointerPressed = pointer.IsPressed;
+        }
+
+        var pointerPlane = SpatialQuadOverlayMath.CreatePointerPlane(
+            overlay.Plane,
+            pointer,
+            OverlayRenderer.PointerLogicalExtent,
+            PointerLayerOffset);
+        _spatialOverlayManager.UpdateLayerTransform(
+            overlay.Id,
+            SpatialOverlayLayer.Pointer,
+            pointerPlane,
+            origin);
+        _spatialOverlayManager.ShowLayer(overlay.Id, SpatialOverlayLayer.Pointer);
     }
 
     private InteractiveOverlay AddInteractiveOverlay(
@@ -2160,7 +4801,9 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         CapturedFrame? capture,
         ResultOverlayState? resultState,
         WpfWindowOverlaySource? windowSource = null,
-        bool canGrab = true)
+        bool canGrab = true,
+        AssistantConversation? conversation = null,
+        bool showToolbarWhenGrabbed = true)
     {
         var overlay = new InteractiveOverlay
         {
@@ -2169,15 +4812,17 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             Plane = plane,
             Capture = capture,
             Result = resultState,
+            Conversation = conversation,
             WindowSource = windowSource,
-            CanGrab = canGrab
+            CanGrab = canGrab,
+            ShowToolbarWhenGrabbed = showToolbarWhenGrabbed
         };
         _interactiveOverlays.Add(overlay);
         overlay.IsDirty = true;
         return overlay;
     }
 
-    private void RemoveInteractiveOverlay(long overlayId, string reason)
+    private void RemoveInteractiveOverlay(long overlayId, string reason, bool publishStatus = true)
     {
         var overlay = FindOverlay(overlayId);
         if (overlay is null)
@@ -2185,12 +4830,35 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             return;
         }
 
+        foreach (var submission in _submissions.Values
+                     .Where(item => item.OverlayId == overlayId)
+                     .ToArray())
+        {
+            _log.Info(
+                $"{DiagnosticTag(submission.OperationId, submission.RequestId)} [submit] " +
+                $"结果窗口关闭，正在取消请求：原因={reason}。");
+            submission.Cancellation.Cancel();
+        }
+
+        if (_overlayCloseHold.OverlayId == overlayId)
+        {
+            _overlayCloseHold.Reset();
+            _suppressResultClickRelease = true;
+        }
+
         _spatialOverlayManager?.Remove(overlayId);
         _interactiveOverlays.Remove(overlay);
+        _pendingDiagnosticWpfInteractions.Remove(overlayId);
+        _contactOverlayIds.Remove(overlayId);
         overlay.WindowSource?.Dispose();
-        if (_grab?.OverlayId == overlayId)
+        if (_controlPanelOverlayId == overlayId)
         {
-            _grab = null;
+            _controlPanelOverlayId = null;
+            _controlPanelWindow = null;
+        }
+        if (_grabs.RemoveOverlay(overlayId))
+        {
+            MarkGrabbedOverlaysDirty();
         }
         if (_interactionTargetOverlayId == overlayId)
         {
@@ -2205,7 +4873,10 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             ResetOverlayPointer();
         }
         _log.Info($"[interaction] 空间对象已关闭：Overlay={overlayId}，原因={reason}，剩余={_interactiveOverlays.Count}。");
-        Publish($"已关闭空间对象，当前剩余 {_interactiveOverlays.Count} 个。", SelectionState.Idle);
+        if (publishStatus)
+        {
+            Publish(LF("Interaction.ClosedCount", _interactiveOverlays.Count), SelectionState.Idle);
+        }
     }
 
     private InteractiveOverlay? FindOverlay(long overlayId) =>
@@ -2218,27 +4889,63 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             return;
         }
 
-        if (_interactionTargetOverlayId is { } previousId && FindOverlay(previousId) is { } previous)
-        {
-            previous.IsDirty = true;
-        }
         _interactionTargetOverlayId = overlayId;
-        if (overlayId is { } currentId && FindOverlay(currentId) is { } current)
+        if (overlayId is { } currentId && FindOverlay(currentId) is { } currentOverlay)
         {
-            current.IsDirty = true;
-            _log.Info($"[interaction] 手部接触空间对象：Overlay={currentId}，类型={current.Kind}。");
+            _log.Info(
+                $"[interaction] 手部接触空间对象：Overlay={currentId}，" +
+                $"类型={currentOverlay.Kind}，手={_interactionContactHand?.ToString() ?? "Unknown"}。");
         }
+    }
+
+    private void SetContactHighlights(
+        OverlayContact? left,
+        OverlayContact? right,
+        IEnumerable<OverlayGrab>? grabs = null)
+    {
+        var next = OverlayContactHighlights.Select(left, right, grabs);
+        foreach (var overlayId in _contactOverlayIds.Concat(next).Distinct())
+        {
+            if (_contactOverlayIds.Contains(overlayId) == next.Contains(overlayId))
+            {
+                continue;
+            }
+
+            if (FindOverlay(overlayId) is { } overlay)
+            {
+                var highlighted = next.Contains(overlayId);
+                overlay.IsHighlighted = highlighted;
+                overlay.IsDirty = true;
+                overlay.SynchronizeTextureBuffers = true;
+                overlay.WindowSource?.SetInteractionHighlighted(highlighted);
+                _log.Info(
+                    $"[interaction] 接触边框：Overlay={overlayId}，" +
+                    $"状态={(highlighted ? "On" : "Off")}，" +
+                    $"来源={(highlighted && _grabs.ContainsOverlay(overlayId) ? "Grab" : highlighted ? "Touch" : "None")}。");
+            }
+        }
+
+        _contactOverlayIds.Clear();
+        _contactOverlayIds.UnionWith(next);
     }
 
     private InteractiveOverlay? ResolveInteractionTarget(bool capturesOnly = false)
     {
-        var id = _grab?.OverlayId ?? _interactionTargetOverlayId;
+        if (_grabs.HasMultiple)
+        {
+            return null;
+        }
+
+        var id = _grabs.Single?.OverlayId ?? _interactionTargetOverlayId;
         var overlay = id is { } overlayId ? FindOverlay(overlayId) : null;
         return capturesOnly && overlay?.Kind != InteractiveOverlayKind.Capture ? null : overlay;
     }
 
-    private SpatialSelectionPlane CreateResultPlaneInFront(SpatialSelectionPlane source)
+    private SpatialSelectionPlane CreateResultPlaneInFront(
+        SpatialSelectionPlane source,
+        AssistantRequestMode mode)
     {
+        var resultPlane = ResultOverlayLayout.ApplyModeDimensions(source, mode);
         var poses = new TrackedDevicePose_t[OpenVR.k_unMaxTrackedDeviceCount];
         OpenVR.System.GetDeviceToAbsoluteTrackingPose(
             CurrentTrackingOrigin(),
@@ -2247,7 +4954,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         var hmdPose = poses[OpenVR.k_unTrackedDeviceIndex_Hmd];
         if (!hmdPose.bPoseIsValid)
         {
-            return source;
+            return resultPlane;
         }
 
         var matrix = hmdPose.mDeviceToAbsoluteTracking;
@@ -2255,7 +4962,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         var right = Right(matrix);
         var normal = forward * -1f;
         var up = Vector3f.Cross(normal, right).Normalized();
-        return source with
+        return resultPlane with
         {
             Center = Position(matrix) + (forward * ResultPlaneDistance),
             Right = right,
@@ -2402,28 +5109,46 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
 
     private void ShutdownOpenVr()
     {
+        Volatile.Write(ref _currentSceneProcessId, 0);
         if (_openVrInitialized || _connected)
         {
             _log.Info("正在释放 OpenVR Overlay、动作句柄和运行时连接。");
         }
         _connected = false;
         _lastTogglePressed = false;
+        _idleTogglePressedAt = null;
+        _idleToggleLongHoldActivated = false;
         _lastResultClickPressed = false;
+        _suppressResultClickRelease = false;
         _lastLeftGripPressed = false;
         _lastRightGripPressed = false;
         _lastLeftPointerPressed = false;
         _lastRightPointerPressed = false;
+        _diagnosticPressedOverlayIds.Clear();
         ResetOverlayPointer();
         _interactionTargetOverlayId = null;
         _interactionContactHand = null;
-        _grab = null;
-        _voiceInputPressed = false;
-        _voiceInputWasPhysicallyPressed = false;
-        _voiceInputReleaseCandidateAt = null;
+        _activeCaptureOperationId = null;
+        _grabs.Clear();
+        _vrVoiceInputPressed = false;
+        if (!_desktopVoiceInputPressed)
+        {
+            _voiceInputPressed = false;
+            _voiceInputWasPhysicallyPressed = false;
+            _voiceInputReleaseCandidateAt = null;
+        }
         _lastRenderedSnapshot = null;
         _interactiveOverlaysSuppressed = false;
         _commandPress.Reset();
-        if (_commandRecorder.IsRecording && _submissionTask is null)
+        _toolbarCommandPressOverlayId = null;
+        _commandTargetOverlayId = null;
+        _overlayCloseHold.Reset();
+        foreach (var overlay in _interactiveOverlays)
+        {
+            overlay.IsCommandRecording = false;
+            overlay.CloseHoldProgress = null;
+        }
+        if (_commandRecorder.IsRecording)
         {
             try
             {
@@ -2434,7 +5159,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                 _log.Error("释放 SteamVR 时取消语音命令录音失败。", exception);
             }
         }
-        if (_voiceInputRecorder.IsRecording)
+        if (_voiceInputRecorder.IsRecording && !_desktopVoiceInputPressed)
         {
             try
             {
@@ -2451,17 +5176,18 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         if (_openVrInitialized)
         {
             _pipeline.ReleaseOpenVrResources();
+            var overlayApi = OpenVR.Overlay;
             var handles = new[] { _selectionOverlayHandle };
             foreach (var handle in handles)
             {
-                if (handle == OpenVR.k_ulOverlayHandleInvalid)
+                if (handle == OpenVR.k_ulOverlayHandleInvalid || overlayApi is null)
                 {
                     continue;
                 }
 
-                _ = OpenVR.Overlay.HideOverlay(handle);
-                _ = OpenVR.Overlay.ClearOverlayTexture(handle);
-                _ = OpenVR.Overlay.DestroyOverlay(handle);
+                _ = overlayApi.HideOverlay(handle);
+                _ = overlayApi.ClearOverlayTexture(handle);
+                _ = overlayApi.DestroyOverlay(handle);
             }
 
             OpenVR.Shutdown();
@@ -2472,7 +5198,16 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         foreach (var overlay in _interactiveOverlays)
         {
             overlay.IsShown = false;
+            overlay.IsHighlighted = false;
             overlay.IsDirty = true;
+            overlay.IsChromeDirty = true;
+            overlay.IsProgressDirty = true;
+            overlay.SynchronizeTextureBuffers = true;
+            overlay.SynchronizeVideoTextureBuffers = true;
+            overlay.SynchronizeChromeTextureBuffers = true;
+            overlay.SynchronizeProgressTextureBuffers = true;
+            overlay.SynchronizePointerTextureBuffers = true;
+            overlay.RenderedPointerPressed = null;
         }
         _overlayTextureDevice?.Dispose();
         _overlayTextureDevice = null;
@@ -2525,6 +5260,11 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         }
     }
 
+    private static string L(string key) => AppLocalization.Text(key);
+
+    private static string LF(string key, params object?[] args) =>
+        AppLocalization.Format(key, args);
+
     private void Publish(string message, SelectionState state, bool isError = false)
     {
         var logMessage = $"{DiagnosticTag()} [state] [{state}] {message}";
@@ -2542,8 +5282,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
 
     private string DiagnosticTag(long? operationId = null, long? requestId = null)
     {
-        operationId ??= _activeOperationId;
-        requestId ??= _activeSubmissionRequestId;
+        operationId ??= _activeCaptureOperationId;
         var operation = operationId is { } op ? $"op={op:D4}" : "op=----";
         var request = requestId is { } req ? $" request={req:D4}" : string.Empty;
         return $"[{operation}{request}]";
@@ -2563,11 +5302,212 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
     }
 }
 
+internal sealed record PreparedResultContent(
+    string DisplayText,
+    string VisibleText,
+    ResultContentFormat Format,
+    byte[]? RenderedImage);
+
+internal abstract record DiagnosticResultOverlayCommand;
+
+internal sealed record ShowDiagnosticMarkdownOverlayCommand(
+    string Markdown,
+    TaskCompletionSource<long> Completion) : DiagnosticResultOverlayCommand;
+
+internal sealed record ShowDiagnosticChatOverlayCommand(
+    AssistantConversationView Chat,
+    TaskCompletionSource<long> Completion) : DiagnosticResultOverlayCommand;
+
+internal sealed record UpdateDiagnosticChatOverlayCommand(
+    long CommandId,
+    long OverlayId,
+    AssistantConversationView Chat) : DiagnosticResultOverlayCommand;
+
+internal sealed record ScrollDiagnosticResultOverlayCommand(
+    long RequestId,
+    long OverlayId,
+    double Delta) : DiagnosticResultOverlayCommand;
+
+internal sealed record CloseDiagnosticResultOverlayCommand(
+    long OverlayId,
+    TaskCompletionSource<bool> Completion) : DiagnosticResultOverlayCommand;
+
+internal sealed class WpfOverlayFrameRenderedEventArgs(
+    long overlayId,
+    string name,
+    int pixelWidth,
+    int pixelHeight,
+    TimeSpan rasterizeDuration,
+    TimeSpan uploadDuration,
+    TimeSpan totalDuration,
+    DateTimeOffset renderedAt,
+    bool isDirectPixels = false) : EventArgs
+{
+    public long OverlayId { get; } = overlayId;
+
+    public string Name { get; } = name;
+
+    public int PixelWidth { get; } = pixelWidth;
+
+    public int PixelHeight { get; } = pixelHeight;
+
+    public TimeSpan RasterizeDuration { get; } = rasterizeDuration;
+
+    public TimeSpan UploadDuration { get; } = uploadDuration;
+
+    public TimeSpan TotalDuration { get; } = totalDuration;
+
+    public DateTimeOffset RenderedAt { get; } = renderedAt;
+
+    public bool IsDirectPixels { get; } = isDirectPixels;
+}
+
+internal sealed class ResultOverlayFrameRenderedEventArgs(
+    long overlayId,
+    ResultContentFormat contentFormat,
+    bool isChat,
+    int pixelWidth,
+    int pixelHeight,
+    TimeSpan rasterizeDuration,
+    TimeSpan uploadDuration,
+    TimeSpan totalDuration,
+    DateTimeOffset renderedAt) : EventArgs
+{
+    public long OverlayId { get; } = overlayId;
+
+    public ResultContentFormat ContentFormat { get; } = contentFormat;
+
+    public bool IsChat { get; } = isChat;
+
+    public int PixelWidth { get; } = pixelWidth;
+
+    public int PixelHeight { get; } = pixelHeight;
+
+    public TimeSpan RasterizeDuration { get; } = rasterizeDuration;
+
+    public TimeSpan UploadDuration { get; } = uploadDuration;
+
+    public TimeSpan TotalDuration { get; } = totalDuration;
+
+    public DateTimeOffset RenderedAt { get; } = renderedAt;
+}
+
+internal sealed class DiagnosticRuntimeFrameCompletedEventArgs(
+    long completedTimestamp,
+    TimeSpan workDuration) : EventArgs
+{
+    public long CompletedTimestamp { get; } = completedTimestamp;
+
+    public TimeSpan WorkDuration { get; } = workDuration;
+}
+
+internal sealed class DiagnosticWpfPointerProcessedEventArgs(
+    long requestId,
+    long overlayId,
+    bool isPressed,
+    NormalizedPoint requestedTexturePoint,
+    NormalizedPoint? resolvedTexturePoint,
+    string? hoveredControlName,
+    bool usedOpenVrIntersection,
+    bool leftWindow,
+    long processedTimestamp,
+    TimeSpan queueDuration) : EventArgs
+{
+    public long RequestId { get; } = requestId;
+
+    public long OverlayId { get; } = overlayId;
+
+    public bool IsPressed { get; } = isPressed;
+
+    public NormalizedPoint RequestedTexturePoint { get; } = requestedTexturePoint;
+
+    public NormalizedPoint? ResolvedTexturePoint { get; } = resolvedTexturePoint;
+
+    public string? HoveredControlName { get; } = hoveredControlName;
+
+    public bool UsedOpenVrIntersection { get; } = usedOpenVrIntersection;
+
+    public bool LeftWindow { get; } = leftWindow;
+
+    public long ProcessedTimestamp { get; } = processedTimestamp;
+
+    public TimeSpan QueueDuration { get; } = queueDuration;
+}
+
+internal sealed class DiagnosticWpfInteractionCompletedEventArgs(
+    long requestId,
+    long overlayId,
+    DiagnosticWpfInteractionKind kind,
+    string? controlName,
+    bool succeeded,
+    long completedTimestamp,
+    TimeSpan requestToTextureDuration,
+    TimeSpan processedToTextureDuration,
+    string? failure) : EventArgs
+{
+    public long RequestId { get; } = requestId;
+
+    public long OverlayId { get; } = overlayId;
+
+    public DiagnosticWpfInteractionKind Kind { get; } = kind;
+
+    public string? ControlName { get; } = controlName;
+
+    public bool Succeeded { get; } = succeeded;
+
+    public long CompletedTimestamp { get; } = completedTimestamp;
+
+    public TimeSpan RequestToTextureDuration { get; } = requestToTextureDuration;
+
+    public TimeSpan ProcessedToTextureDuration { get; } = processedToTextureDuration;
+
+    public string? Failure { get; } = failure;
+}
+
+internal sealed class ActiveSubmission
+{
+    private int _resultUpdateSequence;
+
+    public required long OperationId { get; init; }
+
+    public required long RequestId { get; init; }
+
+    public required long SourceOverlayId { get; init; }
+
+    public required long OverlayId { get; init; }
+
+    public required AssistantRequestMode Mode { get; init; }
+
+    public required IReadOnlyList<AssistantConversationTurn> ConversationHistory { get; init; }
+
+    public required Stopwatch Stopwatch { get; init; }
+
+    public required CancellationTokenSource Cancellation { get; init; }
+
+    public AssistantConversation? Conversation { get; init; }
+
+    public string? CustomCommand { get; set; }
+
+    public ResultOverlaySnapshot? PreviousResult { get; init; }
+
+    public Task<TranslationResult> Task { get; set; } = null!;
+
+    public int ResultUpdateSequence => Volatile.Read(ref _resultUpdateSequence);
+
+    public int NextResultUpdateSequence() => Interlocked.Increment(ref _resultUpdateSequence);
+}
+
 internal enum CommandButtonEventKind
 {
     Down,
     Up,
     ShortPress
+}
+
+internal enum VrControlPanelAction
+{
+    StartCapture,
+    OpenSubtitles
 }
 
 internal enum ResultScrollBoundary

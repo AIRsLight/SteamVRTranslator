@@ -1,0 +1,368 @@
+<Window x:Class="SteamVRTranslator.App.SteamVR.VrControlPanelWindow"
+        x:ClassModifier="internal"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:SteamVRTranslator.App"
+        xmlns:steamvr="clr-namespace:SteamVRTranslator.App.SteamVR"
+        Width="840" Height="560" MinWidth="840" MaxWidth="840" MinHeight="560" MaxHeight="560"
+        SizeToContent="Manual" AllowsTransparency="True"
+        WindowStyle="None" ResizeMode="NoResize" ShowInTaskbar="False" ShowActivated="False"
+        Background="Transparent" Foreground="#F2F7F5" FontFamily="Segoe UI" FontSize="16"
+        UseLayoutRounding="True" SnapsToDevicePixels="True">
+    <Window.Resources>
+        <Style x:Key="IconButton" TargetType="Button">
+            <Setter Property="Width" Value="48" />
+            <Setter Property="Height" Value="48" />
+            <Setter Property="Margin" Value="5" />
+            <Setter Property="Foreground" Value="#E9F2EF" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="#8090A29D" />
+            <Setter Property="BorderThickness" Value="1.5" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Shell" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="12">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="steamvr:VrPointerHover.IsHovered" Value="True"><Setter TargetName="Shell" Property="Background" Value="#2639D5B6" /><Setter TargetName="Shell" Property="BorderBrush" Value="#FF78EBD2" /></Trigger>
+                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="Shell" Property="Background" Value="#5941DABD" /></Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.35" /></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="MenuButton" TargetType="Button">
+            <Setter Property="Width" Value="170" />
+            <Setter Property="Height" Value="170" />
+            <Setter Property="Margin" Value="10" />
+            <Setter Property="Padding" Value="18" />
+            <Setter Property="Foreground" Value="#EDF5F2" />
+            <Setter Property="Background" Value="#08141D1B" />
+            <Setter Property="BorderBrush" Value="#7093A5A0" />
+            <Setter Property="BorderThickness" Value="1.5" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Shell" Padding="{TemplateBinding Padding}" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="14">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="steamvr:VrPointerHover.IsHovered" Value="True"><Setter TargetName="Shell" Property="Background" Value="#2930CFAE" /><Setter TargetName="Shell" Property="BorderBrush" Value="#FF78EBD2" /></Trigger>
+                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="Shell" Property="Background" Value="#5037D7B7" /></Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.32" /></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ToggleTile" TargetType="ToggleButton">
+            <Setter Property="Height" Value="80" />
+            <Setter Property="Margin" Value="6" />
+            <Setter Property="Padding" Value="18,0" />
+            <Setter Property="Foreground" Value="#DCE7E3" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="#708FA19C" />
+            <Setter Property="BorderThickness" Value="1.5" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Shell" Padding="{TemplateBinding Padding}" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="12">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="26" /></Grid.ColumnDefinitions>
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                <Ellipse x:Name="StateDot" Grid.Column="1" Width="15" Height="15" Stroke="#8099AAA5" StrokeThickness="1.5" Fill="Transparent" />
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True"><Setter TargetName="Shell" Property="BorderBrush" Value="#FF4DE0C1" /><Setter TargetName="Shell" Property="Background" Value="#2630CFAE" /><Setter TargetName="StateDot" Property="Fill" Value="#FF4DE0C1" /><Setter TargetName="StateDot" Property="Stroke" Value="#FF4DE0C1" /></Trigger>
+                            <Trigger Property="steamvr:VrPointerHover.IsHovered" Value="True"><Setter TargetName="Shell" Property="BorderBrush" Value="#FF78EBD2" /></Trigger>
+                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="Shell" Property="Background" Value="#5037D7B7" /></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SegmentButton" TargetType="ToggleButton">
+            <Setter Property="Height" Value="48" />
+            <Setter Property="Margin" Value="4" />
+            <Setter Property="Foreground" Value="#C9D5D1" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="#607F918C" />
+            <Setter Property="BorderThickness" Value="1.5" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Shell" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="10">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True"><Setter TargetName="Shell" Property="Background" Value="#3832D4B3" /><Setter TargetName="Shell" Property="BorderBrush" Value="#FF4DE0C1" /><Setter Property="Foreground" Value="#FFFFFF" /></Trigger>
+                            <Trigger Property="steamvr:VrPointerHover.IsHovered" Value="True"><Setter TargetName="Shell" Property="BorderBrush" Value="#FF78EBD2" /></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid x:Name="OverlayCanvas" Background="Transparent">
+        <Border x:Name="WindowFrame" Margin="4" Padding="18" Background="#C91A211F" BorderBrush="Transparent"
+                BorderThickness="3" CornerRadius="20" SnapsToDevicePixels="True">
+            <Grid ClipToBounds="True">
+            <Grid.RowDefinitions><RowDefinition Height="62" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+
+            <StackPanel x:Name="UtilityButtons" Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="HomeButton" Style="{StaticResource IconButton}" Click="HomeButton_Click">
+                    <Path Data="{x:Static local:MaterialIconPaths.HomeOutline}" Width="23" Height="23" Stretch="Uniform" Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                </Button>
+                <Button x:Name="CloseButton" Style="{StaticResource IconButton}" Click="CloseButton_Click">
+                    <Path Data="{x:Static local:MaterialIconPaths.Close}" Width="23" Height="23" Stretch="Uniform" Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                </Button>
+            </StackPanel>
+
+            <Grid x:Name="MainPage" Grid.Row="1" Margin="0,2,0,0">
+                <WrapPanel HorizontalAlignment="Center" VerticalAlignment="Top" ItemWidth="190" ItemHeight="190">
+                <Button x:Name="CaptureMenuButton" Style="{StaticResource MenuButton}" Click="CaptureMenuButton_Click">
+                    <Path Data="{x:Static local:MaterialIconPaths.CameraOutline}" Width="58" Height="58" Stretch="Uniform" Fill="#4DE0C1" />
+                </Button>
+                <Button x:Name="VoiceMenuButton" Style="{StaticResource MenuButton}" Click="VoiceMenuButton_Click">
+                    <Path Data="{x:Static local:MaterialIconPaths.Microphone}" Width="58" Height="58" Stretch="Uniform" Fill="#4DE0C1" />
+                </Button>
+                <Button x:Name="SubtitleMenuButton" Style="{StaticResource MenuButton}" Click="SubtitleMenuButton_Click">
+                    <Path Data="{x:Static local:MaterialIconPaths.ClosedCaptionOutline}" Width="58" Height="58" Stretch="Uniform" Fill="#4DE0C1" />
+                </Button>
+                <Button x:Name="SettingsMenuButton" Style="{StaticResource MenuButton}" Click="SettingsMenuButton_Click">
+                    <Path Data="{x:Static local:MaterialIconPaths.CogOutline}" Width="58" Height="58" Stretch="Uniform" Fill="#4DE0C1" />
+                </Button>
+                <Button x:Name="MirrorMenuButton" Style="{StaticResource MenuButton}" Click="MirrorMenuButton_Click">
+                    <Path Data="{x:Static local:MaterialIconPaths.Cellphone}" Width="58" Height="58" Stretch="Uniform" Fill="#4DE0C1" />
+                </Button>
+                </WrapPanel>
+            </Grid>
+
+            <Grid x:Name="VoicePage" Grid.Row="1" Visibility="Collapsed" Margin="6,0">
+                <Grid.RowDefinitions><RowDefinition Height="96" /><RowDefinition Height="86" /><RowDefinition Height="86" /><RowDefinition Height="86" /></Grid.RowDefinitions>
+                <Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
+                    <ToggleButton x:Name="VoiceEnabledToggle" Style="{StaticResource ToggleTile}" Checked="Control_Changed" Unchecked="Control_Changed">
+                        <Path Data="{x:Static local:MaterialIconPaths.Microphone}" Width="34" Height="34" Stretch="Uniform" Fill="{Binding RelativeSource={RelativeSource AncestorType=ToggleButton}, Path=Foreground}" />
+                    </ToggleButton>
+                    <ToggleButton x:Name="TranslationEnabledToggle" Grid.Column="1" Style="{StaticResource ToggleTile}" Checked="Control_Changed" Unchecked="Control_Changed">
+                        <Path Data="{x:Static local:MaterialIconPaths.Translate}" Width="36" Height="36" Stretch="Uniform" Fill="{Binding RelativeSource={RelativeSource AncestorType=ToggleButton}, Path=Foreground}" />
+                    </ToggleButton>
+                    <ToggleButton x:Name="SendImmediatelyToggle" Grid.Column="2" Style="{StaticResource ToggleTile}" Checked="Control_Changed" Unchecked="Control_Changed">
+                        <Path Data="{x:Static local:MaterialIconPaths.Send}" Width="34" Height="34" Stretch="Uniform" Fill="{Binding RelativeSource={RelativeSource AncestorType=ToggleButton}, Path=Foreground}" />
+                    </ToggleButton>
+                </Grid>
+                <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
+                    <ToggleButton x:Name="TranslationOnlyButton" Style="{StaticResource SegmentButton}" Click="DisplayModeButton_Click" />
+                    <ToggleButton x:Name="OriginalThenTranslationButton" Grid.Column="1" Style="{StaticResource SegmentButton}" Click="DisplayModeButton_Click" />
+                </Grid>
+                <Grid Grid.Row="2"><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
+                    <ToggleButton x:Name="ChineseButton" Style="{StaticResource SegmentButton}" Click="TargetLanguageButton_Click" Tag="zh-CN" />
+                    <ToggleButton x:Name="JapaneseButton" Grid.Column="1" Style="{StaticResource SegmentButton}" Click="TargetLanguageButton_Click" Tag="ja-JP" />
+                    <ToggleButton x:Name="EnglishButton" Grid.Column="2" Style="{StaticResource SegmentButton}" Click="TargetLanguageButton_Click" Tag="en-US" />
+                </Grid>
+                <Grid Grid.Row="3"><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="104" /></Grid.ColumnDefinitions>
+                    <Slider x:Name="ChunkIntervalSlider" Height="42" Margin="8,0" Minimum="0" Maximum="3000" TickFrequency="100" IsSnapToTickEnabled="True" ValueChanged="Control_Changed" />
+                    <Border Grid.Column="1" Margin="8,14,4,14" BorderBrush="#708FA19C" BorderThickness="1.5" CornerRadius="9"><TextBlock x:Name="ChunkIntervalValue" HorizontalAlignment="Center" VerticalAlignment="Center" /></Border>
+                </Grid>
+            </Grid>
+
+            <Grid x:Name="SubtitlePage" Grid.Row="1" Visibility="Collapsed" Margin="6,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="70" />
+                    <RowDefinition Height="70" />
+                    <RowDefinition Height="70" />
+                    <RowDefinition Height="70" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
+                    <ToggleButton x:Name="SubtitleSenseVoiceButton" Style="{StaticResource SegmentButton}"
+                                  Click="SubtitleBackendButton_Click" Tag="sensevoice" Content="SenseVoice" />
+                    <ToggleButton x:Name="SubtitleVibeVoiceButton" Grid.Column="1" Style="{StaticResource SegmentButton}"
+                                  Click="SubtitleBackendButton_Click" Tag="vibevoice-api" Content="VibeVoice" />
+                </Grid>
+                <Grid Grid.Row="1">
+                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
+                    <ToggleButton x:Name="SubtitleShowOriginalButton" Style="{StaticResource ToggleTile}"
+                                  Checked="SubtitleControl_Changed" Unchecked="SubtitleControl_Changed">
+                        <TextBlock Text="SRC" FontSize="17" FontWeight="SemiBold" />
+                    </ToggleButton>
+                    <ToggleButton x:Name="SubtitleTranslateButton" Grid.Column="1" Style="{StaticResource ToggleTile}"
+                                  Checked="SubtitleControl_Changed" Unchecked="SubtitleControl_Changed">
+                        <Path Data="{x:Static local:MaterialIconPaths.Translate}" Width="30" Height="30" Stretch="Uniform"
+                              Fill="{Binding RelativeSource={RelativeSource AncestorType=ToggleButton}, Path=Foreground}" />
+                    </ToggleButton>
+                    <ToggleButton x:Name="SubtitleSpeakerColorsButton" Grid.Column="2" Style="{StaticResource ToggleTile}"
+                                  Checked="SubtitleControl_Changed" Unchecked="SubtitleControl_Changed">
+                        <TextBlock Text="A/B" FontSize="17" FontWeight="SemiBold" />
+                    </ToggleButton>
+                </Grid>
+                <Grid Grid.Row="2">
+                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
+                    <ToggleButton x:Name="SubtitleChineseButton" Style="{StaticResource SegmentButton}"
+                                  Click="SubtitleLanguageButton_Click" Tag="zh-CN" Content="中" />
+                    <ToggleButton x:Name="SubtitleJapaneseButton" Grid.Column="1" Style="{StaticResource SegmentButton}"
+                                  Click="SubtitleLanguageButton_Click" Tag="ja-JP" Content="日" />
+                    <ToggleButton x:Name="SubtitleEnglishButton" Grid.Column="2" Style="{StaticResource SegmentButton}"
+                                  Click="SubtitleLanguageButton_Click" Tag="en-US" Content="EN" />
+                </Grid>
+                <Grid Grid.Row="3">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="1.35*" /><ColumnDefinition /><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
+                    <ToggleButton x:Name="SubtitleDiarizationButton" Style="{StaticResource ToggleTile}"
+                                  Checked="SubtitleControl_Changed" Unchecked="SubtitleControl_Changed">
+                        <TextBlock Text="A/B" FontSize="17" FontWeight="SemiBold" />
+                    </ToggleButton>
+                    <ToggleButton x:Name="SubtitleThread1Button" Grid.Column="1" Style="{StaticResource SegmentButton}"
+                                  Click="SubtitleThreadButton_Click" Tag="1" Content="1T" />
+                    <ToggleButton x:Name="SubtitleThread2Button" Grid.Column="2" Style="{StaticResource SegmentButton}"
+                                  Click="SubtitleThreadButton_Click" Tag="2" Content="2T" />
+                    <ToggleButton x:Name="SubtitleThread4Button" Grid.Column="3" Style="{StaticResource SegmentButton}"
+                                  Click="SubtitleThreadButton_Click" Tag="4" Content="4T" />
+                </Grid>
+                <Grid Grid.Row="4" Margin="5,10,5,5">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="220" /></Grid.ColumnDefinitions>
+                    <TextBlock x:Name="SubtitleStatusText" VerticalAlignment="Center" Foreground="#AFC1BA"
+                               TextTrimming="CharacterEllipsis" Margin="12,0" />
+                    <Button x:Name="SubtitleOpenWindowButton" Grid.Column="1" Style="{StaticResource IconButton}"
+                            Width="210" Height="62" Click="SubtitleOpenWindowButton_Click">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <Path Data="{x:Static local:MaterialIconPaths.ClosedCaptionOutline}" Width="27" Height="27"
+                                  Stretch="Uniform" Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                            <TextBlock x:Name="SubtitleOpenWindowText" Margin="10,0,0,0" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
+            </Grid>
+
+            <Grid x:Name="SettingsPage" Grid.Row="1" Visibility="Collapsed" Margin="6,0">
+                <Grid.RowDefinitions><RowDefinition Height="210" /><RowDefinition Height="72" /></Grid.RowDefinitions>
+                <WrapPanel HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,12,0,0"
+                           ItemWidth="190" ItemHeight="190">
+                    <ToggleButton x:Name="LeftEyeButton" Style="{StaticResource SegmentButton}"
+                                  Width="170" Height="170" Click="CaptureEyeButton_Click" Tag="left-eye">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <Path Data="{x:Static local:MaterialIconPaths.EyeOutline}" Width="52" Height="52"
+                                  Stretch="Uniform" Fill="{Binding RelativeSource={RelativeSource AncestorType=ToggleButton}, Path=Foreground}" />
+                            <TextBlock Text="L" FontSize="20" Margin="0,12,0,0" HorizontalAlignment="Center" />
+                        </StackPanel>
+                    </ToggleButton>
+                    <ToggleButton x:Name="RightEyeButton" Style="{StaticResource SegmentButton}"
+                                  Width="170" Height="170" Click="CaptureEyeButton_Click" Tag="right-eye">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <Path Data="{x:Static local:MaterialIconPaths.EyeOutline}" Width="52" Height="52"
+                                  Stretch="Uniform" Fill="{Binding RelativeSource={RelativeSource AncestorType=ToggleButton}, Path=Foreground}" />
+                            <TextBlock Text="R" FontSize="20" Margin="0,12,0,0" HorizontalAlignment="Center" />
+                        </StackPanel>
+                    </ToggleButton>
+                    <ToggleButton x:Name="PointerRayButton" Style="{StaticResource SegmentButton}"
+                                  Width="170" Height="170" Checked="Control_Changed" Unchecked="Control_Changed">
+                        <Path Data="{x:Static local:MaterialIconPaths.Send}" Width="52" Height="52"
+                              Stretch="Uniform" Fill="{Binding RelativeSource={RelativeSource AncestorType=ToggleButton}, Path=Foreground}" />
+                    </ToggleButton>
+                </WrapPanel>
+                <UniformGrid Grid.Row="1" Columns="5" Margin="38,0">
+                    <ToggleButton x:Name="PointerSmoothing0Button" Style="{StaticResource SegmentButton}" Click="PointerSmoothingButton_Click" Tag="0" Content="0" />
+                    <ToggleButton x:Name="PointerSmoothing25Button" Style="{StaticResource SegmentButton}" Click="PointerSmoothingButton_Click" Tag="25" Content="25" />
+                    <ToggleButton x:Name="PointerSmoothing50Button" Style="{StaticResource SegmentButton}" Click="PointerSmoothingButton_Click" Tag="50" Content="50" />
+                    <ToggleButton x:Name="PointerSmoothing75Button" Style="{StaticResource SegmentButton}" Click="PointerSmoothingButton_Click" Tag="75" Content="75" />
+                    <ToggleButton x:Name="PointerSmoothing100Button" Style="{StaticResource SegmentButton}" Click="PointerSmoothingButton_Click" Tag="100" Content="100" />
+                </UniformGrid>
+            </Grid>
+
+            <Grid x:Name="MirrorPage" Grid.Row="1" Visibility="Collapsed" Margin="6,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="82" />
+                    <RowDefinition Height="66" />
+                    <RowDefinition Height="66" />
+                    <RowDefinition Height="66" />
+                    <RowDefinition Height="66" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="62" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="62" />
+                        <ColumnDefinition Width="62" />
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="MirrorPreviousDeviceButton" Style="{StaticResource IconButton}" Width="54" Height="54" Click="MirrorPreviousDeviceButton_Click">
+                        <Path Data="{x:Static local:MaterialIconPaths.ChevronLeft}" Width="26" Height="26" Stretch="Uniform" Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                    </Button>
+                    <Border Grid.Column="1" Margin="6,8" BorderBrush="#708FA19C" BorderThickness="1.5" CornerRadius="10" Background="#08141D1B">
+                        <StackPanel VerticalAlignment="Center" Margin="14,0">
+                            <TextBlock x:Name="MirrorDeviceText" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                            <TextBlock x:Name="MirrorStatusText" FontSize="11" Foreground="#B9C8C3" Margin="0,3,0,0" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                    </Border>
+                    <Button x:Name="MirrorNextDeviceButton" Grid.Column="2" Style="{StaticResource IconButton}" Width="54" Height="54" Click="MirrorNextDeviceButton_Click">
+                        <Path Data="{x:Static local:MaterialIconPaths.ChevronRight}" Width="26" Height="26" Stretch="Uniform" Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                    </Button>
+                    <Button x:Name="MirrorRefreshButton" Grid.Column="3" Style="{StaticResource IconButton}" Width="54" Height="54" Click="MirrorRefreshButton_Click">
+                        <Path Data="{x:Static local:MaterialIconPaths.Refresh}" Width="24" Height="24" Stretch="Uniform" Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                    </Button>
+                </Grid>
+
+                <UniformGrid Grid.Row="1" Columns="3">
+                    <ToggleButton x:Name="Mirror720Button" Style="{StaticResource SegmentButton}" Click="MirrorSizeButton_Click" Tag="720" Content="720p" />
+                    <ToggleButton x:Name="Mirror900Button" Style="{StaticResource SegmentButton}" Click="MirrorSizeButton_Click" Tag="900" Content="900p" />
+                    <ToggleButton x:Name="Mirror1080Button" Style="{StaticResource SegmentButton}" Click="MirrorSizeButton_Click" Tag="1080" Content="1080p" />
+                </UniformGrid>
+
+                <UniformGrid Grid.Row="2" Columns="4">
+                    <ToggleButton x:Name="Mirror30FpsButton" Style="{StaticResource SegmentButton}" Click="MirrorFpsButton_Click" Tag="30" Content="30 FPS" />
+                    <ToggleButton x:Name="Mirror60FpsButton" Style="{StaticResource SegmentButton}" Click="MirrorFpsButton_Click" Tag="60" Content="60 FPS" />
+                    <ToggleButton x:Name="Mirror90FpsButton" Style="{StaticResource SegmentButton}" Click="MirrorFpsButton_Click" Tag="90" Content="90 FPS" />
+                    <ToggleButton x:Name="Mirror120FpsButton" Style="{StaticResource SegmentButton}" Click="MirrorFpsButton_Click" Tag="120" Content="120 FPS" />
+                </UniformGrid>
+
+                <UniformGrid Grid.Row="3" Columns="3">
+                    <ToggleButton x:Name="Mirror4MbpsButton" Style="{StaticResource SegmentButton}" Click="MirrorBitRateButton_Click" Tag="4" Content="4 Mbps" />
+                    <ToggleButton x:Name="Mirror8MbpsButton" Style="{StaticResource SegmentButton}" Click="MirrorBitRateButton_Click" Tag="8" Content="8 Mbps" />
+                    <ToggleButton x:Name="Mirror12MbpsButton" Style="{StaticResource SegmentButton}" Click="MirrorBitRateButton_Click" Tag="12" Content="12 Mbps" />
+                </UniformGrid>
+
+                <UniformGrid Grid.Row="4" Columns="4">
+                    <ToggleButton x:Name="Mirror075ScaleButton" Style="{StaticResource SegmentButton}" Click="MirrorScaleButton_Click" Tag="0.75" Content="0.75x" />
+                    <ToggleButton x:Name="Mirror100ScaleButton" Style="{StaticResource SegmentButton}" Click="MirrorScaleButton_Click" Tag="1.0" Content="1.0x" />
+                    <ToggleButton x:Name="Mirror125ScaleButton" Style="{StaticResource SegmentButton}" Click="MirrorScaleButton_Click" Tag="1.25" Content="1.25x" />
+                    <ToggleButton x:Name="Mirror150ScaleButton" Style="{StaticResource SegmentButton}" Click="MirrorScaleButton_Click" Tag="1.5" Content="1.5x" />
+                </UniformGrid>
+
+                <Grid Grid.Row="5" Margin="4,8,4,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition /></Grid.ColumnDefinitions>
+                    <Button x:Name="MirrorStartStopButton" Style="{StaticResource MenuButton}" Width="Auto" Height="68" Margin="4" Click="MirrorStartStopButton_Click">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <Path x:Name="MirrorStartStopIcon" Data="{x:Static local:MaterialIconPaths.Play}" Width="30" Height="30" Stretch="Uniform" Fill="#4DE0C1" />
+                            <TextBlock x:Name="MirrorStartStopText" Margin="12,0,0,0" VerticalAlignment="Center" FontSize="15" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="MirrorDownloadButton" Grid.Column="1" Style="{StaticResource MenuButton}" Width="Auto" Height="68" Margin="4" Click="MirrorDownloadButton_Click">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <Path Data="{x:Static local:MaterialIconPaths.Download}" Width="30" Height="30" Stretch="Uniform" Fill="#4DE0C1" />
+                            <TextBlock x:Name="MirrorDownloadText" Margin="12,0,0,0" VerticalAlignment="Center" FontSize="15" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
+            </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

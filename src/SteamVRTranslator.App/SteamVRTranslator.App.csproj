@@ -5,13 +5,19 @@
     <UseWPF>true</UseWPF>
     <PlatformTarget>x64</PlatformTarget>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>SteamVRTranslator</AssemblyName>
     <RootNamespace>SteamVRTranslator.App</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\SteamVRTranslator.Core\SteamVRTranslator.Core.csproj" />
     <ProjectReference Include="..\SteamVRTranslator.OpenVR\SteamVRTranslator.OpenVR.csproj" />
+    <PackageReference Include="HtmlAgilityPack" Version="1.12.4" />
+    <PackageReference Include="FFmpeg.AutoGen.Bindings.DynamicallyLoaded" Version="8.1.0" />
+    <PackageReference Include="MdXaml" Version="1.27.0" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4078.44" />
     <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.4" />
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
     <EmbeddedResource Include="SteamVR\*.json" />
   </ItemGroup>

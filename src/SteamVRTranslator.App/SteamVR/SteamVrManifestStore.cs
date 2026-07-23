@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text.Json;
+using SteamVRTranslator.App.Configuration;
 
 namespace SteamVRTranslator.App.SteamVR;
 
@@ -19,10 +20,7 @@ internal static class SteamVrManifestStore
 
     public static SteamVrManifestPaths EnsureExtracted()
     {
-        var directory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SteamVRTranslator",
-            "SteamVR");
+        var directory = ApplicationDataPaths.SteamVrDirectory;
         Directory.CreateDirectory(directory);
 
         var assembly = typeof(SteamVrManifestStore).Assembly;
@@ -76,4 +74,3 @@ internal static class SteamVrManifestStore
 }
 
 internal sealed record SteamVrManifestPaths(string ActionManifestPath, string ApplicationManifestPath);
-

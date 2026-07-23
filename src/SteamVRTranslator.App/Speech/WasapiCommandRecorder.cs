@@ -51,7 +51,9 @@ public sealed class WasapiCommandRecorder : IDisposable
                 : enumerator.GetDevice(_configuration.DeviceId);
             _deviceName = device.FriendlyName;
             _capture = new WasapiCapture(device);
-            _outputPath = Path.Combine(Path.GetTempPath(), $"steamvr-translator-command-{Guid.NewGuid():N}.wav");
+            _outputPath = ApplicationDataPaths.CreateTemporaryFilePath(
+                "steamvr-translator-command",
+                ".wav");
             _writer = new WaveFileWriter(_outputPath, _capture.WaveFormat);
             _stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             _duration = Stopwatch.StartNew();

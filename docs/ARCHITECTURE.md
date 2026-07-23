@@ -32,7 +32,7 @@ The overlay is transformed into the compositor's current tracking space with `Se
 
 Capture is explicitly configured as `left-eye` or `right-eye`. The selected mirror texture remains acquired across captures, is primed for two compositor frames on first use, and is rectified with the HMD pose stored in the matching compositor frame timing. Legacy stereo values migrate to `left-eye`.
 
-Selection remains a standalone OpenVR overlay. Every persistent capture, result or WPF window is a separate standard Quad Overlay with its own absolute transform and D3D11 texture. The runtime updates overlay sort order from HMD distance for deterministic application-owned stacking; game depth is intentionally outside the contract. Capture and result textures upload only when dirty, while registered WPF windows can opt into a bounded refresh rate.
+Selection remains a standalone OpenVR overlay. Every persistent capture, result or WPF window is one logical object backed by layered standard Quad Overlays: a static content layer, a transparent toolbar/highlight layer, a compact close-progress layer and a 64-pixel cursor layer. Persistent content textures use aspect-matched 512, 1024 or 2048-pixel long-edge tiers; ordinary capture and WPF content cap at 1024 while rendered HTML uses a native 2048 tier. Cursor motion only updates the child overlay transform, and close progress uploads a 256-pixel texture, so neither path redraws the content texture. The runtime reserves adjacent sort orders for each object's layers, then orders logical objects by HMD distance for deterministic application-owned stacking; game depth is intentionally outside the contract. Capture and result content textures upload only when dirty, while registered WPF windows can opt into a bounded refresh rate.
 
 ## Result lifecycle
 
@@ -44,16 +44,22 @@ The result surface is rendered from an offscreen read-only WPF `TextBox`, whose 
 
 `IWpfSpatialOverlayHost` is the extension boundary for arbitrary same-process WPF windows. `WpfWindowOverlaySource` renders the visual tree to a frozen bitmap and converts normalized overlay UVs into `WM_MOUSEMOVE`, `WM_LBUTTONDOWN`, `WM_LBUTTONUP` and `WM_MOUSEWHEEL` messages for that window's HWND. It never moves the desktop cursor or injects global input.
 
+## Prompt configuration
+
+Markdown translation, HTML layout translation and custom voice commands each own a system prompt and a task prompt. The editable task prompt contains only behavioral instructions: the pipeline appends the selected target language or transcribed user command as required context after it. Prompt edits are debounced, persisted atomically and passed to `TranslationPipeline.ApplyLiveSettings`, so the next request observes a complete prompt snapshot without recreating the SteamVR runtime.
+
 ## Replaceable boundaries
 
 - `SteamVrCompositorCaptureService` owns D3D11 mirror-texture readback and eye projection.
 - `TranslationPipeline` coordinates capture, persistence and translation.
 - `ITranslationBackend` isolates cloud provider protocol.
 - `WasapiCommandRecorder` records the locked-region command gesture without delaying short-press translation.
-- `SenseVoiceCommandTranscriber` owns the resident worker used only by custom-command submissions.
+- `SenseVoiceCommandTranscriber` owns the resident worker used by custom-command and VRChat PTT submissions. It selects the CPU executable or the downloaded Vulkan executable and passes the configured physical-device index to the same worker protocol.
 - `ICustomCommandBackend` receives the captured image and plain transcription; it streams plain text rather than structured JSON.
 - `SpatialQuadOverlayManager` owns one OpenVR handle and D3D11 texture queue per persistent object, including intersection and distance sorting.
 - `IWpfSpatialOverlayHost` exposes window registration, invalidation and removal without exposing OpenVR handles to extension code.
-- `SteamVrTranslationRuntime` owns OpenVR calls on one polling thread.
+- `SteamVrTranslationRuntime` owns OpenVR calls on one polling thread. It passively attaches as `VRApplication_Background` only after `vrserver` and `vrcompositor` are present; after a quit event it waits for both processes to disappear before rearming, so this application never owns the SteamVR lifecycle.
+- `VibeVoiceApiTranscriber` is the subtitle-side HTTP client. It submits a complete audio file so VibeVoice can preserve native speaker context across the recording, then maps returned anonymous speaker labels into the subtitle session.
+- `SteamVRTranslator.VibeVoice.Server` is a separate ASP.NET Core process. It owns CrispASR runtime/model installation, the resident inference child process and the authenticated OpenAI-compatible transcription endpoint. The desktop application never loads VibeVoice weights into its own process.
 
 The main voice-input project is intentionally not referenced. The SenseVoice executable protocol and portable file layout are compatible, while configuration and lifecycle ownership remain local to this application.
