@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:SteamVRTranslator.App"
         xmlns:loc="clr-namespace:SteamVRTranslator.App.Localization"
+        xmlns:steamvr="clr-namespace:SteamVRTranslator.App.SteamVR"
         Title="{loc:Loc Key=Subtitle.Window.Title}"
         Width="720" Height="480" MinWidth="520" MinHeight="360"
         WindowStartupLocation="CenterOwner"
@@ -12,8 +13,8 @@
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
         <Style x:Key="ToolbarButton" TargetType="Button">
-            <Setter Property="Width" Value="36" />
-            <Setter Property="Height" Value="36" />
+            <Setter Property="Width" Value="44" />
+            <Setter Property="Height" Value="44" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="#F4F8F6" />
             <Setter Property="BorderBrush" Value="#70FFFFFF" />
@@ -29,6 +30,10 @@
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
+                            <Trigger Property="steamvr:VrPointerHover.IsHovered" Value="True">
+                                <Setter TargetName="Shell" Property="Background" Value="#304DE0C1" />
+                                <Setter TargetName="Shell" Property="BorderBrush" Value="#FF4DE0C1" />
+                            </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Shell" Property="Background" Value="#304DE0C1" />
                                 <Setter TargetName="Shell" Property="BorderBrush" Value="#FF4DE0C1" />
@@ -47,7 +52,7 @@
             BorderThickness="2" CornerRadius="20" ClipToBounds="True">
         <Grid>
             <Grid.RowDefinitions>
-                <RowDefinition Height="58" />
+                <RowDefinition Height="66" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
             <Border Background="#B81F2926" BorderBrush="#55FFFFFF"
@@ -66,7 +71,7 @@
                                    Foreground="#B8C8C2" Margin="0,2,0,0" />
                     </StackPanel>
                     <Button x:Name="ListenButton" Grid.Column="1" Style="{StaticResource ToolbarButton}"
-                            Width="132" Margin="0,0,12,0" Click="ListenButton_Click"
+                            Width="144" Margin="0,0,12,0" Click="ListenButton_Click"
                             ToolTip="{loc:Loc Key=Subtitle.Window.StartListening}">
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                             <Path x:Name="ListenButtonIcon" Data="{x:Static local:MaterialIconPaths.Play}"

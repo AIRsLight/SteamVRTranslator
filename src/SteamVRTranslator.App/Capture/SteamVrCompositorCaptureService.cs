@@ -4,13 +4,12 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using SharpGen.Runtime;
 using SteamVRTranslator.App.Diagnostics;
+using SteamVRTranslator.App.SteamVR;
 using SteamVRTranslator.Core.Geometry;
 using SteamVRTranslator.Core.Selection;
 using Valve.VR;
-using Vortice.Direct3D;
 using Vortice.Direct3D11;
 using Vortice.DXGI;
-using static Vortice.Direct3D11.D3D11;
 
 namespace SteamVRTranslator.App.Capture;
 
@@ -119,18 +118,14 @@ internal sealed class SteamVrCompositorCaptureService : IDisposable
             return;
         }
 
-        var result = D3D11CreateDevice(
-            null,
-            DriverType.Hardware,
-            DeviceCreationFlags.BgraSupport,
-            [FeatureLevel.Level_11_1, FeatureLevel.Level_11_0],
+        SteamVrD3D11DeviceFactory.Create(
+            _log,
+            "SteamVR 捕获",
             out var device,
-            out var featureLevel,
+            out _,
             out var context);
-        result.CheckError();
         _device = device;
         _context = context;
-        _log.Info($"D3D11 SteamVR 捕获设备已创建：FeatureLevel={featureLevel}");
     }
 
     private MirrorEyeSource EnsureMirror(EVREye eye, out bool created)
