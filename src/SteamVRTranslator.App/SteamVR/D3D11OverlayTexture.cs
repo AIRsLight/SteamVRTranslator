@@ -1,34 +1,26 @@
 using SteamVRTranslator.App.Diagnostics;
 using Valve.VR;
-using Vortice.Direct3D;
 using Vortice.Direct3D11;
 using Vortice.DXGI;
-using static Vortice.Direct3D11.D3D11;
 
 namespace SteamVRTranslator.App.SteamVR;
 
 internal sealed class D3D11OverlayDevice : IDisposable
 {
-    private readonly AppLog _log;
     private readonly ID3D11Device _device;
     private readonly ID3D11DeviceContext _context;
     private readonly ID3D11Query _uploadCompleteQuery;
 
     public D3D11OverlayDevice(AppLog log)
     {
-        _log = log;
-        var result = D3D11CreateDevice(
-            null,
-            DriverType.Hardware,
-            DeviceCreationFlags.BgraSupport,
-            [FeatureLevel.Level_11_1, FeatureLevel.Level_11_0],
+        SteamVrD3D11DeviceFactory.Create(
+            log,
+            "Overlay",
             out _device,
-            out var featureLevel,
+            out _,
             out _context);
-        result.CheckError();
         _uploadCompleteQuery = _device.CreateQuery(
             new QueryDescription(QueryType.Event, QueryFlags.None));
-        _log.Info($"D3D11 Overlay 共享设备已创建：FeatureLevel={featureLevel}");
     }
 
     public ID3D11Device Device => _device;
