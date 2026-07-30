@@ -112,6 +112,7 @@ internal sealed class WpfWindowOverlaySource : IDisposable
     private readonly nint _windowHandle;
     private readonly IWpfOverlayPointerSink? _pointerSink;
     private readonly IWpfOverlayPointerHoverAware? _pointerHoverAware;
+    private readonly IWpfOverlayPointerControlResolver? _pointerControlResolver;
     private readonly IWpfOverlayDirectPixelSource? _directPixelSource;
     private readonly int _fallbackClientWidth;
     private readonly int _fallbackClientHeight;
@@ -134,6 +135,7 @@ internal sealed class WpfWindowOverlaySource : IDisposable
         _dispatcher = window.Dispatcher;
         _pointerSink = window as IWpfOverlayPointerSink;
         _pointerHoverAware = window as IWpfOverlayPointerHoverAware;
+        _pointerControlResolver = window as IWpfOverlayPointerControlResolver;
         _directPixelSource = window as IWpfOverlayDirectPixelSource;
         Options = options.Validated();
         var metrics = Invoke(ReadWindowMetrics);
@@ -721,6 +723,17 @@ internal sealed class WpfWindowOverlaySource : IDisposable
         }
 
         EnsureLayout(root, _fallbackClientWidth, _fallbackClientHeight);
+        if (_pointerControlResolver?.ResolvePointerControl(point) is
+            {
+                IsVisible: true,
+                IsHitTestVisible: true,
+                IsEnabled: true
+            } resolved &&
+            resolved is ButtonBase or Slider)
+        {
+            return resolved;
+        }
+
         HitTestResult? hit = null;
         VisualTreeHelper.HitTest(
             root,
@@ -929,6 +942,11 @@ internal interface IWpfOverlayInvalidationSource
 internal interface IWpfOverlayPointerHoverAware
 {
     bool SetPointerHover(NormalizedPoint? point);
+}
+
+internal interface IWpfOverlayPointerControlResolver
+{
+    FrameworkElement? ResolvePointerControl(NormalizedPoint point);
 }
 
 public static class VrPointerHover

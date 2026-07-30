@@ -1,14 +1,22 @@
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using SteamVRTranslator.App.Localization;
 using SteamVRTranslator.App.SteamVR;
+using SteamVRTranslator.Core.Selection;
 
 namespace SteamVRTranslator.App.Subtitles;
 
-public partial class SubtitleHistoryWindow : Window, IWpfOverlayInteractionHighlightAware, IWpfOverlayInvalidationSource
+public partial class SubtitleHistoryWindow : Window,
+    IWpfOverlayInteractionHighlightAware,
+    IWpfOverlayInvalidationSource,
+    IWpfOverlayPointerHoverAware,
+    IWpfOverlayPointerControlResolver
 {
+    private const double VrButtonHitPadding = 10;
     private readonly SubtitleHistoryViewModel _viewModel;
+    private ButtonBase? _hoveredButton;
     private bool _allowClose;
 
     public SubtitleHistoryWindow(SubtitleHistoryViewModel viewModel)
@@ -41,6 +49,74 @@ public partial class SubtitleHistoryWindow : Window, IWpfOverlayInteractionHighl
             ? new SolidColorBrush(Color.FromRgb(46, 229, 140))
             : Brushes.Transparent;
         InvalidateOverlay();
+    }
+
+    public bool SetPointerHover(NormalizedPoint? point)
+    {
+        var hovered = point is { } normalized
+            ? ResolvePointerControl(normalized) as ButtonBase
+            : null;
+        if (ReferenceEquals(_hoveredButton, hovered))
+        {
+            if (hovered is null || VrPointerHover.GetIsHovered(hovered))
+            {
+                return false;
+            }
+        }
+
+        _hoveredButton = hovered;
+        VrPointerHover.SetExclusiveHoveredButton(WindowFrame, hovered);
+        InvalidateOverlay();
+        return true;
+    }
+
+    public FrameworkElement? ResolvePointerControl(NormalizedPoint point)
+    {
+        if (WindowFrame.ActualWidth <= 1 || WindowFrame.ActualHeight <= 1)
+        {
+            return null;
+        }
+
+        var clamped = point.Clamp();
+        var localPoint = new Point(
+            clamped.X * WindowFrame.ActualWidth,
+            clamped.Y * WindowFrame.ActualHeight);
+        ButtonBase? closest = null;
+        var closestDistanceSquared = double.MaxValue;
+        foreach (var button in new ButtonBase[] { ListenButton, ClearButton, CloseButton })
+        {
+            if (!button.IsVisible || !button.IsEnabled || button.ActualWidth <= 1 || button.ActualHeight <= 1)
+            {
+                continue;
+            }
+
+            var topLeft = button.TranslatePoint(new Point(0, 0), WindowFrame);
+            var bounds = new Rect(topLeft, new Size(button.ActualWidth, button.ActualHeight));
+            if (bounds.Contains(localPoint))
+            {
+                return button;
+            }
+
+            bounds.Inflate(VrButtonHitPadding, VrButtonHitPadding);
+            if (!bounds.Contains(localPoint))
+            {
+                continue;
+            }
+
+            var center = new Point(
+                topLeft.X + (button.ActualWidth / 2),
+                topLeft.Y + (button.ActualHeight / 2));
+            var x = localPoint.X - center.X;
+            var y = localPoint.Y - center.Y;
+            var distanceSquared = (x * x) + (y * y);
+            if (distanceSquared < closestDistanceSquared)
+            {
+                closest = button;
+                closestDistanceSquared = distanceSquared;
+            }
+        }
+
+        return closest;
     }
 
     public void ApplyListeningState(SubtitleListeningState state, string? message = null)

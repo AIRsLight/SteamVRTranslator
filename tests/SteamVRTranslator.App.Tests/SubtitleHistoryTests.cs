@@ -8,6 +8,7 @@ using SteamVRTranslator.App.Configuration;
 using SteamVRTranslator.App.Localization;
 using SteamVRTranslator.App.SteamVR;
 using SteamVRTranslator.App.Subtitles;
+using SteamVRTranslator.Core.Selection;
 using Xunit;
 
 namespace SteamVRTranslator.App.Tests;
@@ -290,6 +291,57 @@ public sealed class SubtitleHistoryTests
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
         Assert.True(thread.Join(TimeSpan.FromSeconds(15)), "Subtitle listening button test timed out.");
+        Assert.Null(failure);
+    }
+
+    [Fact]
+    public void HistoryWindowVrHitAreaAcceptsButtonEdgeAndShowsHover()
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var history = new SubtitleHistoryViewModel(new SubtitleConfiguration());
+                history.Add(0, TimeSpan.Zero, TimeSpan.FromSeconds(1), "source");
+                var window = new SubtitleHistoryWindow(history)
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual,
+                    Left = -32000,
+                    Top = -32000,
+                    ShowInTaskbar = false
+                };
+                window.Show();
+                window.UpdateLayout();
+                using var source = new WpfWindowOverlaySource(
+                    window,
+                    new WpfSpatialOverlayOptions());
+                var root = Assert.IsAssignableFrom<FrameworkElement>(window.Content);
+                var clearButton = Assert.IsType<Button>(window.FindName("ClearButton"));
+                var topLeft = clearButton.TranslatePoint(new Point(0, 0), root);
+                var pointer = new NormalizedPoint(
+                    (float)((topLeft.X - 6) / root.ActualWidth),
+                    (float)((topLeft.Y + (clearButton.ActualHeight / 2)) / root.ActualHeight));
+
+                source.PointerMove(pointer);
+                Assert.True(VrPointerHover.GetIsHovered(clearButton));
+                Assert.Equal("ClearButton", source.PointerDown(pointer));
+                Assert.False(source.BeginPointerSwipe(pointer));
+                Assert.True(source.PointerUp(pointer));
+                Assert.Empty(history.Entries);
+
+                source.PointerLeave();
+                Assert.False(VrPointerHover.GetIsHovered(clearButton));
+                window.ClosePermanently();
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(15)), "Subtitle VR hit-area test timed out.");
         Assert.Null(failure);
     }
 
