@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 using SteamVRTranslator.App.Configuration;
 using SteamVRTranslator.App.Diagnostics;
@@ -41,7 +42,12 @@ public sealed class SenseVoiceCommandTranscriber : IDisposable
                 configuration.SenseVoiceVadModelPath,
                 "SenseVoice VAD 模型");
         }
-        var arguments = BuildArguments(configuration, modelPath, vadPath);
+        var workingDirectory = Path.GetFullPath(AppContext.BaseDirectory);
+        var modelArgument = SenseVoiceNativePath.Resolve(modelPath, workingDirectory);
+        var vadArgument = vadPath is null
+            ? null
+            : SenseVoiceNativePath.Resolve(vadPath, workingDirectory);
+        var arguments = BuildArguments(configuration, modelArgument, vadArgument);
 
         _log.Info(
             $"[asr] 正在启动 SenseVoice 常驻进程：运行时={executablePath}，" +
@@ -49,8 +55,8 @@ public sealed class SenseVoiceCommandTranscriber : IDisposable
             $"GPU={configuration.SenseVoiceVulkanDeviceIndex?.ToString() ?? "None"}/" +
             $"{configuration.SenseVoiceVulkanDeviceName ?? "None"}，" +
             $"语言={configuration.EffectiveRecognitionLanguage}，" +
-            $"模型={modelPath}，VAD={configuration.SenseVoiceVadModelPath}");
-        _worker = new SenseVoiceResidentWorker(executablePath, arguments);
+            $"模型={modelPath}，VAD={vadPath}");
+        _worker = new SenseVoiceResidentWorker(executablePath, arguments, workingDirectory);
         _log.Info($"[asr] SenseVoice 常驻进程已就绪：PID={_worker.ProcessId}。");
     }
 
@@ -192,6 +198,7 @@ public sealed record CommandTranscriptionResult(string Text, TimeSpan Duration);
 internal sealed class SenseVoiceResidentWorker : IDisposable
 {
     private static readonly TimeSpan StartupTimeout = TimeSpan.FromMinutes(2);
+    private readonly string _workingDirectory;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Process _process;
     private readonly object _stderrSync = new();
@@ -201,10 +208,15 @@ internal sealed class SenseVoiceResidentWorker : IDisposable
 
     public int ProcessId => _process.Id;
 
-    public SenseVoiceResidentWorker(string executablePath, IEnumerable<string> arguments)
+    public SenseVoiceResidentWorker(
+        string executablePath,
+        IEnumerable<string> arguments,
+        string? workingDirectory = null)
     {
+        _workingDirectory = Path.GetFullPath(workingDirectory ?? AppContext.BaseDirectory);
         var startInfo = new ProcessStartInfo(executablePath)
         {
+            WorkingDirectory = _workingDirectory,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -257,7 +269,8 @@ internal sealed class SenseVoiceResidentWorker : IDisposable
                 _stderr.Clear();
             }
 
-            var encodedPath = Convert.ToBase64String(Encoding.UTF8.GetBytes(Path.GetFullPath(audioPath)));
+            var nativeAudioPath = SenseVoiceNativePath.Resolve(audioPath, _workingDirectory);
+            var encodedPath = Convert.ToBase64String(Encoding.UTF8.GetBytes(nativeAudioPath));
             try
             {
                 await _process.StandardInput.WriteLineAsync($"TRANSCRIBE\t{encodedPath}".AsMemory(), cancellationToken);
@@ -417,6 +430,64 @@ internal sealed class SenseVoiceResidentWorker : IDisposable
             throw new InvalidOperationException("SenseVoice 返回了无效的 Base64 文本。", exception);
         }
     }
+}
+
+internal static class SenseVoiceNativePath
+{
+    public static string Resolve(string path, string workingDirectory)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var fullWorkingDirectory = Path.GetFullPath(workingDirectory);
+        var relativePath = Path.GetRelativePath(fullWorkingDirectory, fullPath);
+        if (!Path.IsPathRooted(relativePath) && IsAscii(relativePath))
+        {
+            return relativePath;
+        }
+        if (IsAscii(fullPath))
+        {
+            return fullPath;
+        }
+
+        var shortPath = TryGetShortPath(fullPath);
+        if (!string.IsNullOrWhiteSpace(shortPath) && IsAscii(shortPath))
+        {
+            return shortPath;
+        }
+
+        throw new InvalidOperationException(
+            $"SenseVoice 原生运行时无法读取包含非 ASCII 字符的外部路径：{fullPath}。" +
+            "请将该文件放入程序目录，或改用仅包含英文、数字和常用符号的路径。");
+    }
+
+    internal static bool IsAscii(string value) => value.All(character => character <= 0x7f);
+
+    private static string? TryGetShortPath(string path)
+    {
+        var capacity = 512;
+        while (capacity <= 32768)
+        {
+            var buffer = new StringBuilder(capacity);
+            var length = GetShortPathName(path, buffer, buffer.Capacity);
+            if (length == 0)
+            {
+                return null;
+            }
+            if (length < buffer.Capacity)
+            {
+                return buffer.ToString();
+            }
+
+            capacity = checked((int)length + 1);
+        }
+
+        return null;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetShortPathName(
+        string longPath,
+        StringBuilder shortPath,
+        int bufferLength);
 }
 
 public sealed class NoSpeechRecognizedException(string message) : InvalidOperationException(message);

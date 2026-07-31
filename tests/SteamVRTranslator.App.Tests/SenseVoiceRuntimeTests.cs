@@ -117,6 +117,98 @@ public sealed class SenseVoiceRuntimeTests
         Assert.Equal(["-m", "model.gguf", "--language", "auto"], arguments);
     }
 
+    [Fact]
+    public void NativePathsStayAsciiInsideAUnicodeInstallDirectory()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            $"语音输入测试-{Guid.NewGuid():N}");
+        var modelPath = Path.Combine(root, "models", "sensevoice-small-q8.gguf");
+        var audioPath = Path.Combine(root, "runtime-data", "temp", "voice-input.wav");
+        Directory.CreateDirectory(Path.GetDirectoryName(modelPath)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(audioPath)!);
+        File.WriteAllText(modelPath, "model");
+        File.WriteAllText(audioPath, "audio");
+        try
+        {
+            var modelArgument = SenseVoiceNativePath.Resolve(modelPath, root);
+            var audioArgument = SenseVoiceNativePath.Resolve(audioPath, root);
+
+            Assert.Equal(
+                Path.Combine("models", "sensevoice-small-q8.gguf"),
+                modelArgument);
+            Assert.Equal(
+                Path.Combine("runtime-data", "temp", "voice-input.wav"),
+                audioArgument);
+            Assert.True(SenseVoiceNativePath.IsAscii(modelArgument));
+            Assert.True(SenseVoiceNativePath.IsAscii(audioArgument));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public async Task ResidentWorkerTranscribesFromAUnicodeInstallDirectory()
+    {
+        var runtimeSource = Environment.GetEnvironmentVariable(
+            "STEAMVR_TRANSLATOR_SENSEVOICE_RUNTIME");
+        var modelSource = Environment.GetEnvironmentVariable(
+            "STEAMVR_TRANSLATOR_SENSEVOICE_MODEL");
+        var audioSource = Environment.GetEnvironmentVariable(
+            "STEAMVR_TRANSLATOR_SENSEVOICE_AUDIO");
+        if (string.IsNullOrWhiteSpace(runtimeSource) ||
+            string.IsNullOrWhiteSpace(modelSource) ||
+            string.IsNullOrWhiteSpace(audioSource))
+        {
+            Assert.NotEqual(
+                "1",
+                Environment.GetEnvironmentVariable(
+                    "STEAMVR_TRANSLATOR_SENSEVOICE_INTEGRATION_REQUIRED"));
+            return;
+        }
+
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            $"SteamVR翻译中文路径测试-{Guid.NewGuid():N}");
+        var runtimePath = Path.Combine(root, "runtimes", "llama-funasr-sensevoice.exe");
+        var modelPath = Path.Combine(root, "models", "sensevoice-small-q5_0.gguf");
+        var audioPath = Path.Combine(root, "runtime-data", "temp", "sample.wav");
+        Directory.CreateDirectory(Path.GetDirectoryName(runtimePath)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(modelPath)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(audioPath)!);
+        File.Copy(runtimeSource, runtimePath);
+        File.Copy(modelSource, modelPath);
+        File.Copy(audioSource, audioPath);
+        try
+        {
+            var configuration = new SpeechConfiguration
+            {
+                SenseVoiceBackend = "cpu",
+                EffectiveRecognitionLanguage = "auto"
+            };
+            var arguments = SenseVoiceCommandTranscriber.BuildArguments(
+                configuration,
+                SenseVoiceNativePath.Resolve(modelPath, root),
+                null);
+
+            using var worker = new SenseVoiceResidentWorker(
+                runtimePath,
+                arguments,
+                root);
+            var text = await worker.TranscribeAsync(
+                audioPath,
+                CancellationToken.None);
+
+            Assert.False(string.IsNullOrWhiteSpace(text));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
     [Theory]
     [InlineData("auto")]
     [InlineData("zh")]
