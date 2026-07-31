@@ -6,6 +6,7 @@ using Xunit;
 
 namespace SteamVRTranslator.App.Tests;
 
+[Collection(MainWindowTestCollection.Name)]
 public sealed class OverlayRendererTests
 {
     [WpfRenderingFact]
