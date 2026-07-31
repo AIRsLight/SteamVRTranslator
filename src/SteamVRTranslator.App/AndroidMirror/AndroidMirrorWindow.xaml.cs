@@ -20,7 +20,9 @@ internal partial class AndroidMirrorWindow : Window,
     private TaskCompletionSource<AndroidVideoFrame>? _firstFrame = new(
         TaskCreationOptions.RunContinuationsAsynchronously);
     private AndroidVideoFrame? _latestFrame;
+    private DirectOverlayPixelRegion _screenRegion = DirectOverlayPixelRegion.Full;
     private DirectOverlayPixelRegion _directPixelRegion = DirectOverlayPixelRegion.Full;
+    private double _windowAspectRatio = 400d / 920d;
     private int _hasVideoFrame;
     private int _sourceWidth;
     private int _sourceHeight;
@@ -93,13 +95,14 @@ internal partial class AndroidMirrorWindow : Window,
         NavigationRow.Height = new GridLength(NavigationHeight);
         Width = screenWidth + FrameThickness;
         Height = screenHeight + NavigationHeight + FrameThickness;
-        Volatile.Write(
-            ref _directPixelRegion,
-            new DirectOverlayPixelRegion(
-                (float)((FrameThickness / 2d) / Width),
-                (float)((FrameThickness / 2d) / Height),
-                (float)(screenWidth / Width),
-                (float)(screenHeight / Height)));
+        var screenRegion = new DirectOverlayPixelRegion(
+            (float)((FrameThickness / 2d) / Width),
+            (float)((FrameThickness / 2d) / Height),
+            (float)(screenWidth / Width),
+            (float)(screenHeight / Height));
+        Volatile.Write(ref _screenRegion, screenRegion);
+        Volatile.Write(ref _windowAspectRatio, Width / Height);
+        UpdateVideoRegion(sourceWidth, sourceHeight);
 
         var normalizedPortraitWidth = AndroidMirrorConfiguration.NormalizeWindowWidthMeters(
             portraitWidthMeters);
@@ -246,6 +249,7 @@ internal partial class AndroidMirrorWindow : Window,
         Volatile.Read(ref _firstFrame)?.TrySetResult(frame);
         Volatile.Write(ref _sourceWidth, frame.Width);
         Volatile.Write(ref _sourceHeight, frame.Height);
+        UpdateVideoRegion(frame.Width, frame.Height);
         Interlocked.Exchange(ref _latestFrame, frame);
         Volatile.Write(ref _hasVideoFrame, 1);
     }
@@ -331,6 +335,16 @@ internal partial class AndroidMirrorWindow : Window,
             out touch);
     }
 
+    private void UpdateVideoRegion(int sourceWidth, int sourceHeight)
+    {
+        var fitted = AndroidTouchCoordinateMapper.FitVideoRegion(
+            Volatile.Read(ref _screenRegion),
+            Volatile.Read(ref _windowAspectRatio),
+            sourceWidth,
+            sourceHeight);
+        Volatile.Write(ref _directPixelRegion, fitted);
+    }
+
     private void InvalidateOverlay() => OverlayInvalidated?.Invoke(this, EventArgs.Empty);
 
     private void OnClosed(object? sender, EventArgs e)
@@ -353,9 +367,49 @@ internal static class AndroidTouchCoordinateMapper
 {
     private const float BoundaryEpsilon = 0.0001f;
 
+    public static DirectOverlayPixelRegion FitVideoRegion(
+        DirectOverlayPixelRegion screenRegion,
+        double windowAspectRatio,
+        int sourceWidth,
+        int sourceHeight)
+    {
+        var region = screenRegion.Clamp();
+        if (!double.IsFinite(windowAspectRatio) ||
+            windowAspectRatio <= 0 ||
+            sourceWidth <= 0 ||
+            sourceHeight <= 0)
+        {
+            return region;
+        }
+
+        var sourceAspectRatio = (double)sourceWidth / sourceHeight;
+        var screenAspectRatio = windowAspectRatio * region.Width / region.Height;
+        if (Math.Abs(sourceAspectRatio - screenAspectRatio) < 0.0001d)
+        {
+            return region;
+        }
+
+        if (screenAspectRatio > sourceAspectRatio)
+        {
+            var fittedWidth = (float)(region.Height * sourceAspectRatio / windowAspectRatio);
+            return new DirectOverlayPixelRegion(
+                region.X + ((region.Width - fittedWidth) / 2f),
+                region.Y,
+                fittedWidth,
+                region.Height).Clamp();
+        }
+
+        var fittedHeight = (float)(region.Width * windowAspectRatio / sourceAspectRatio);
+        return new DirectOverlayPixelRegion(
+            region.X,
+            region.Y + ((region.Height - fittedHeight) / 2f),
+            region.Width,
+            fittedHeight).Clamp();
+    }
+
     public static bool TryMap(
         NormalizedPoint point,
-        DirectOverlayPixelRegion screenRegion,
+        DirectOverlayPixelRegion videoRegion,
         int sourceWidth,
         int sourceHeight,
         out AndroidTouchEvent touch)
@@ -366,7 +420,7 @@ internal static class AndroidTouchCoordinateMapper
             return false;
         }
 
-        var region = screenRegion.Clamp();
+        var region = videoRegion.Clamp();
         var right = region.X + region.Width;
         var bottom = region.Y + region.Height;
         if (point.X < region.X - BoundaryEpsilon || point.X > right + BoundaryEpsilon ||

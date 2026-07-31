@@ -310,10 +310,16 @@ internal sealed class ScrcpyAndroidSession : IAsyncDisposable
                 using var decoder = new H264StreamDecoder(
                     _decoderRuntimeDirectory ?? _runtime.RuntimeDirectory,
                     _decodeMode == AndroidVideoDecodeMode.D3D11Hardware);
+                var previousFrameWidth = 0;
+                var previousFrameHeight = 0;
                 decoder.Decode(
                     stream,
                     frame =>
                     {
+                        var sizeChanged = frame.Width != previousFrameWidth ||
+                                          frame.Height != previousFrameHeight;
+                        previousFrameWidth = frame.Width;
+                        previousFrameHeight = frame.Height;
                         var count = Interlocked.Increment(ref _framesReceived);
                         FrameReceived?.Invoke(this, frame);
                         if (count == 1)
@@ -321,8 +327,14 @@ internal sealed class ScrcpyAndroidSession : IAsyncDisposable
                             Publish(AppLocalization.Format(
                                 "AndroidMirror.Status.FrameConnected",
                                 frame.Width,
-                                frame.Height));
+                            frame.Height));
                             _log.Info($"[android-mirror] 收到首帧：{frame.Width}x{frame.Height}。");
+                        }
+                        else if (sizeChanged)
+                        {
+                            _log.Info(
+                                $"[android-mirror] 视频帧尺寸变化：{frame.Width}x{frame.Height}；" +
+                                "显示区域与触摸映射已同步更新。");
                         }
                     },
                     cancellationToken,

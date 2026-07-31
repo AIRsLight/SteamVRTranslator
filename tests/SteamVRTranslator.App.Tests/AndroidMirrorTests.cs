@@ -135,6 +135,61 @@ public sealed class AndroidMirrorTests
     }
 
     [Theory]
+    [InlineData(4000, 1000, 0.10f, 0.30f, 0.80f, 0.40f)]
+    [InlineData(1000, 4000, 0.4625f, 0.20f, 0.075f, 0.60f)]
+    [InlineData(8000, 3000, 0.10f, 0.20f, 0.80f, 0.60f)]
+    public void VideoViewportPreservesArbitrarySourceAspectInsideTheScreenArea(
+        int sourceWidth,
+        int sourceHeight,
+        float expectedX,
+        float expectedY,
+        float expectedWidth,
+        float expectedHeight)
+    {
+        var fitted = AndroidTouchCoordinateMapper.FitVideoRegion(
+            new DirectOverlayPixelRegion(0.10f, 0.20f, 0.80f, 0.60f),
+            2d,
+            sourceWidth,
+            sourceHeight);
+
+        Assert.Equal(expectedX, fitted.X, 5);
+        Assert.Equal(expectedY, fitted.Y, 5);
+        Assert.Equal(expectedWidth, fitted.Width, 5);
+        Assert.Equal(expectedHeight, fitted.Height, 5);
+    }
+
+    [Fact]
+    public void ExtraWideVideoMapsTouchOnlyAcrossItsVisibleLetterboxedArea()
+    {
+        var fitted = AndroidTouchCoordinateMapper.FitVideoRegion(
+            new DirectOverlayPixelRegion(0.10f, 0.20f, 0.80f, 0.60f),
+            2d,
+            4000,
+            1000);
+
+        Assert.False(AndroidTouchCoordinateMapper.TryMap(
+            new NormalizedPoint(0.50f, 0.25f),
+            fitted,
+            4000,
+            1000,
+            out _));
+        Assert.True(AndroidTouchCoordinateMapper.TryMap(
+            new NormalizedPoint(0.50f, 0.30f),
+            fitted,
+            4000,
+            1000,
+            out var top));
+        Assert.Equal(0, top.Y);
+        Assert.True(AndroidTouchCoordinateMapper.TryMap(
+            new NormalizedPoint(0.50f, 0.70f),
+            fitted,
+            4000,
+            1000,
+            out var bottom));
+        Assert.Equal(999, bottom.Y);
+    }
+
+    [Theory]
     [InlineData((byte)AndroidTouchAction.Down, ushort.MaxValue)]
     [InlineData((byte)AndroidTouchAction.Move, ushort.MaxValue)]
     [InlineData((byte)AndroidTouchAction.Up, 0)]
@@ -215,7 +270,32 @@ public sealed class AndroidMirrorTests
                 Assert.Equal(900d / 404d, image.Width / image.Height, 3);
                 Assert.Equal(0.28, window.RecommendedWidthMeters, 2);
                 Assert.InRange(window.RecommendedHeightMeters, 0.14, 0.15);
+                var landscapeRegion = window.DirectPixelRegion;
+                Assert.Equal(
+                    900d / 404d,
+                    (window.Width / window.Height) *
+                    landscapeRegion.Width /
+                    landscapeRegion.Height,
+                    3);
                 SaveMirrorVisual(window, "landscape");
+
+                window.ConfigureForSource(3600, 900);
+                var wideRegion = window.DirectPixelRegion;
+                Assert.Equal(
+                    4d,
+                    (window.Width / window.Height) * wideRegion.Width / wideRegion.Height,
+                    3);
+                Assert.True(AndroidTouchCoordinateMapper.TryMap(
+                    new NormalizedPoint(
+                        wideRegion.X + (wideRegion.Width * 0.75f),
+                        wideRegion.Y + (wideRegion.Height * 0.25f)),
+                    wideRegion,
+                    3600,
+                    900,
+                    out var wideTouch));
+                Assert.Equal(2699, wideTouch.X);
+                Assert.Equal(225, wideTouch.Y);
+
                 Assert.NotNull(window.FindName("BackButton"));
                 Assert.NotNull(window.FindName("HomeButton"));
                 Assert.NotNull(window.FindName("RecentAppsButton"));
@@ -396,5 +476,204 @@ public sealed class AndroidMirrorTests
                 frame.Height)));
             await Task.Delay(100);
         }
+    }
+
+    [Fact]
+    [Trait("Category", "AndroidIntegration")]
+    public void WideAvdResolutionChangesKeepVideoAndTouchAligned()
+    {
+        var serial = Environment.GetEnvironmentVariable("STEAMVR_TRANSLATOR_ANDROID_DEVICE");
+        if (string.IsNullOrWhiteSpace(serial))
+        {
+            if (string.Equals(
+                    Environment.GetEnvironmentVariable("STEAMVR_TRANSLATOR_ANDROID_REQUIRED"),
+                    "1",
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "Android integration was required, but no device serial reached the test process.");
+            }
+            return;
+        }
+
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                RunWideAvdResolutionChangeTest(serial);
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.True(
+            thread.Join(TimeSpan.FromMinutes(2)),
+            "Android wide-screen resolution change test timed out.");
+        if (failure is not null)
+        {
+            ExceptionDispatchInfo.Capture(failure).Throw();
+        }
+    }
+
+    private static void RunWideAvdResolutionChangeTest(string serial)
+    {
+        using var runtime = new AndroidMirrorRuntimeService();
+        if (!runtime.IsInstalled)
+        {
+            runtime.DownloadAsync().GetAwaiter().GetResult();
+        }
+
+        var adb = new AdbClient(runtime.AdbPath);
+        var devices = adb.GetDevicesAsync().GetAwaiter().GetResult();
+        var device = Assert.Single(devices, candidate =>
+            candidate.IsOnline &&
+            string.Equals(candidate.Serial, serial, StringComparison.OrdinalIgnoreCase));
+        var log = new AppLog(Path.Combine(
+            Path.GetTempPath(),
+            "SteamVRTranslator-AndroidMirrorResolutionTests"));
+
+        try
+        {
+            SetAndroidDisplaySizeAsync(adb, serial, 2400, 600).GetAwaiter().GetResult();
+            var firstFrame = new TaskCompletionSource<AndroidVideoFrame>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var session = new ScrcpyAndroidSession(runtime, log);
+            session.FrameReceived += (_, frame) => firstFrame.TrySetResult(frame);
+            var window = new AndroidMirrorWindow(session);
+            try
+            {
+                session.StartAsync(
+                    device,
+                    new AndroidMirrorConfiguration
+                    {
+                        DeviceSerial = device.Serial,
+                        MaximumSize = 1080,
+                        MaximumFramesPerSecond = 60,
+                        VideoBitRateMbps = 12
+                    }).GetAwaiter().GetResult();
+                var wideFrame = firstFrame.Task
+                    .WaitAsync(TimeSpan.FromSeconds(30))
+                    .GetAwaiter()
+                    .GetResult();
+                Assert.Equal((1080, 270), (wideFrame.Width, wideFrame.Height));
+                window.ConfigureForSource(wideFrame.Width, wideFrame.Height);
+                AssertVideoAndTouchAlignment(window, session, wideFrame);
+
+                var landscapeFrameTask = WaitForFrameAsync(
+                    session,
+                    frame => frame.Width == 1080 && frame.Height == 540,
+                    TimeSpan.FromSeconds(20));
+                SetAndroidDisplaySizeAsync(adb, serial, 1800, 900).GetAwaiter().GetResult();
+                var landscapeFrame = landscapeFrameTask.GetAwaiter().GetResult();
+                AssertVideoAndTouchAlignment(window, session, landscapeFrame);
+
+                var portraitFrameTask = WaitForFrameAsync(
+                    session,
+                    frame => frame.Width == 270 && frame.Height == 1080,
+                    TimeSpan.FromSeconds(20));
+                SetAndroidDisplaySizeAsync(adb, serial, 600, 2400).GetAwaiter().GetResult();
+                var portraitFrame = portraitFrameTask.GetAwaiter().GetResult();
+                AssertVideoAndTouchAlignment(window, session, portraitFrame);
+            }
+            finally
+            {
+                session.StopAsync().GetAwaiter().GetResult();
+                session.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                window.Close();
+            }
+        }
+        finally
+        {
+            var reset = adb.RunForDeviceAsync(
+                    serial,
+                    ["shell", "wm", "size", "reset"])
+                .GetAwaiter()
+                .GetResult();
+            reset.EnsureSuccess("恢复 Android 显示尺寸");
+        }
+    }
+
+    private static async Task SetAndroidDisplaySizeAsync(
+        AdbClient adb,
+        string serial,
+        int width,
+        int height)
+    {
+        var result = await adb.RunForDeviceAsync(
+            serial,
+            ["shell", "wm", "size", $"{width}x{height}"]);
+        result.EnsureSuccess($"设置 Android 显示尺寸 {width}x{height}");
+        await Task.Delay(400);
+    }
+
+    private static async Task<AndroidVideoFrame> WaitForFrameAsync(
+        ScrcpyAndroidSession session,
+        Func<AndroidVideoFrame, bool> predicate,
+        TimeSpan timeout)
+    {
+        var completion = new TaskCompletionSource<AndroidVideoFrame>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        EventHandler<AndroidVideoFrame>? handler = null;
+        handler = (_, frame) =>
+        {
+            if (predicate(frame))
+            {
+                completion.TrySetResult(frame);
+            }
+        };
+        session.FrameReceived += handler;
+        try
+        {
+            return await completion.Task.WaitAsync(timeout);
+        }
+        finally
+        {
+            session.FrameReceived -= handler;
+        }
+    }
+
+    private static void AssertVideoAndTouchAlignment(
+        AndroidMirrorWindow window,
+        ScrcpyAndroidSession session,
+        AndroidVideoFrame frame)
+    {
+        var region = window.DirectPixelRegion;
+        var physicalAspect = (window.Width / window.Height) *
+                             region.Width /
+                             region.Height;
+        Assert.Equal((double)frame.Width / frame.Height, physicalAspect, 3);
+
+        var point = new NormalizedPoint(
+            region.X + (region.Width * 0.75f),
+            region.Y + (region.Height * 0.25f));
+        Assert.True(AndroidTouchCoordinateMapper.TryMap(
+            point,
+            region,
+            frame.Width,
+            frame.Height,
+            out var touch));
+        Assert.Equal((int)Math.Round(0.75d * (frame.Width - 1)), touch.X);
+        Assert.Equal((int)Math.Round(0.25d * (frame.Height - 1)), touch.Y);
+
+        var outside = region.X > 0.001f
+            ? new NormalizedPoint(region.X / 2f, region.Y + (region.Height / 2f))
+            : new NormalizedPoint(region.X + (region.Width / 2f), region.Y / 2f);
+        Assert.False(AndroidTouchCoordinateMapper.TryMap(
+            outside,
+            region,
+            frame.Width,
+            frame.Height,
+            out _));
+
+        var queuedBefore = session.TouchEventsQueued;
+        Assert.Equal("AndroidScreen", window.PointerDown(point));
+        Assert.True(window.PointerUp(point));
+        Assert.Equal(queuedBefore + 2, session.TouchEventsQueued);
+        Assert.Null(window.PointerDown(outside));
+        Assert.Equal(queuedBefore + 2, session.TouchEventsQueued);
     }
 }
