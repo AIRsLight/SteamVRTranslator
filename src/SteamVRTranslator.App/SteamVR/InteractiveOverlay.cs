@@ -112,8 +112,6 @@ internal sealed class InteractiveOverlay
 
     public WpfWindowOverlaySource? WindowSource { get; init; }
 
-    public bool DirectVideoTransformLogged { get; set; }
-
     public bool CanGrab { get; init; } = true;
 
     public bool ShowToolbarWhenGrabbed { get; init; } = true;
