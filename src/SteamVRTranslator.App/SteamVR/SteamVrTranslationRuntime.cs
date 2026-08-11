@@ -2102,10 +2102,26 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                                 showToolbarWhenGrabbed: source.Options.ShowToolbarWhenGrabbed);
                             _spatialOverlaysVisible = true;
                             createdOverlay.IsDirty = true;
-                            _log.Info(
-                                $"[overlay] WPF 窗口已注册：Overlay={createdOverlay.Id}，" +
-                                $"名称={source.Options.Name}，宽度={plane.Width:F3}m，" +
-                                $"高宽比={source.AspectRatio:F3}。");
+                            // 喵~ 调试日志：打印 WPF plane 和 direct pixel 区域，帮助诊断上下对齐问题
+                            if (source.HasDirectPixelSource)
+                            {
+                                var dpr = source.DirectPixelRegion;
+                                _log.Info(
+                                    $"[overlay] WPF 窗口已注册：Overlay={createdOverlay.Id}，" +
+                                    $"名称={source.Options.Name}，plane={plane.Width:F3}x{plane.Height:F3}m，" +
+                                    $"AspectRatio={source.AspectRatio:F6}，" +
+                                    $"SourcePixel={source.SourcePixelWidth}x{source.SourcePixelHeight}，" +
+                                    $"DirectPixelRegion=(X={dpr.X:F4},Y={dpr.Y:F4},W={dpr.Width:F4},H={dpr.Height:F4})，" +
+                                    $"textureAspect(w/h)={dpr.Width / dpr.Height:F4}。");
+                            }
+                            else
+                            {
+                                _log.Info(
+                                    $"[overlay] WPF 窗口已注册：Overlay={createdOverlay.Id}，" +
+                                    $"名称={source.Options.Name}，plane={plane.Width:F3}x{plane.Height:F3}m，" +
+                                    $"AspectRatio={source.AspectRatio:F6}，" +
+                                    $"SourcePixel={source.SourcePixelWidth}x{source.SourcePixelHeight}。");
+                            }
                             show.Completion.TrySetResult(createdOverlay.Id);
                         }
                         catch
@@ -4619,6 +4635,17 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             overlay.Plane,
             windowSource.DirectPixelRegion,
             VideoLayerOffset);
+        // 喵~ 调试：首次打印视频子平面与主平面尺寸对比
+        if (!overlay.DirectVideoTransformLogged)
+        {
+            overlay.DirectVideoTransformLogged = true;
+            _log.Info(
+                $"[overlay] 视频子平面：Overlay={overlay.Id}，" +
+                $"WPF_plane={overlay.Plane.Width:F3}x{overlay.Plane.Height:F3}m，" +
+                $"video_plane={videoPlane.Width:F3}x{videoPlane.Height:F3}m，" +
+                $"WPF_aspect={overlay.Plane.Width / overlay.Plane.Height:F4}，" +
+                $"video_aspect={videoPlane.Width / videoPlane.Height:F4}。");
+        }
         _spatialOverlayManager.UpdateLayerTransform(
             overlay.Id,
             SpatialOverlayLayer.Video,

@@ -612,7 +612,12 @@ internal sealed class WpfWindowOverlaySource : IDisposable
         var width = requestedWidth;
         var height = requestedHeight;
         var visual = ResolveVisual();
-        // 为后续 HitTest 等操作确保视觉树基础布局可用，但不用该布局的 Actual 尺寸做基准
+        // 强制视觉树按窗口设计尺寸布局，覆盖 HWND 创建时的系统压缩约束
+        if (visual is FrameworkElement element)
+        {
+            element.InvalidateMeasure();
+            element.InvalidateArrange();
+        }
         EnsureLayout(visual, width, height);
         if (!double.IsFinite(width) || width <= 0)
         {
