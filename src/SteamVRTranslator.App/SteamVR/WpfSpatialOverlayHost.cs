@@ -600,19 +600,19 @@ internal sealed class WpfWindowOverlaySource : IDisposable
 
     private WpfWindowMetrics ReadWindowMetrics()
     {
-        var handle = new WindowInteropHelper(_window).EnsureHandle();
         var requestedWidth = double.IsFinite(_window.Width) && _window.Width > 1
             ? _window.Width
             : 800;
         var requestedHeight = double.IsFinite(_window.Height) && _window.Height > 1
             ? _window.Height
             : 600;
+        // 喵~ 必须在 EnsureHandle 之前读取 Window 属性——EnsureHandle 创建 HWND 后
+        // WPF 会把 Height 同步为系统 clamp 值（竖屏 954→815），导致设计尺寸丢失
+        var handle = new WindowInteropHelper(_window).EnsureHandle();
         // 喵~ 用窗口属性值做尺寸快照，避免 Content Actual 被系统工作区压缩后偏离设计值
-        // （竖屏 Android 镜像窗口在 200% 缩放/小屏环境中会被压缩，导致 AspectRatio 错误）
         var width = requestedWidth;
         var height = requestedHeight;
         var visual = ResolveVisual();
-        // 强制视觉树按窗口设计尺寸布局，覆盖 HWND 创建时的系统压缩约束
         if (visual is FrameworkElement element)
         {
             element.InvalidateMeasure();
