@@ -3110,7 +3110,12 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             });
         }
 
-        if (_interactiveOverlays.Count > 0)
+        // 喵~ 仅在真正与叠加层交互（接触或抓握）时才激活 results 动作集，
+        // 避免叠加层存在但未交互时抢占 VR 程序的扳机/抓握/摇杆输入
+        // （overlay 全局优先级高于普通应用，激活即独占这些键位）
+        if (_grabs.Count > 0 ||
+            _interactionTargetOverlayId is not null ||
+            _contactOverlayIds.Count > 0)
         {
             actionSets.Add(new VRActiveActionSet_t
             {
