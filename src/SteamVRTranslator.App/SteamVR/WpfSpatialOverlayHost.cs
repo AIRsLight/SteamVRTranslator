@@ -226,12 +226,10 @@ internal sealed class WpfWindowOverlaySource : IDisposable
             pixelHeight = Math.Max(1, pixelHeight);
             var visual = ResolveVisual();
             EnsureLayout(visual, _fallbackClientWidth, _fallbackClientHeight);
-            var sourceWidth = visual is FrameworkElement element && element.ActualWidth > 1
-                ? element.ActualWidth
-                : _fallbackClientWidth;
-            var sourceHeight = visual is FrameworkElement content && content.ActualHeight > 1
-                ? content.ActualHeight
-                : _fallbackClientHeight;
+            // 喵~ 用窗口属性尺寸做源尺寸基准，与 ReadWindowMetrics 保持一致
+            // 避免窗口被系统压缩后 Actual 偏离设计值导致纹理纵横比与 plane 不一致
+            var sourceWidth = _fallbackClientWidth;
+            var sourceHeight = _fallbackClientHeight;
             var bitmap = new RenderTargetBitmap(
                 pixelWidth,
                 pixelHeight,
@@ -603,20 +601,19 @@ internal sealed class WpfWindowOverlaySource : IDisposable
     private WpfWindowMetrics ReadWindowMetrics()
     {
         var handle = new WindowInteropHelper(_window).EnsureHandle();
-        var visual = ResolveVisual();
         var requestedWidth = double.IsFinite(_window.Width) && _window.Width > 1
             ? _window.Width
             : 800;
         var requestedHeight = double.IsFinite(_window.Height) && _window.Height > 1
             ? _window.Height
             : 600;
-        EnsureLayout(visual, requestedWidth, requestedHeight);
-        var width = visual is FrameworkElement element && element.ActualWidth > 1
-            ? element.ActualWidth
-            : Math.Max(1, _window.ActualWidth > 1 ? _window.ActualWidth : _window.Width);
-        var height = visual is FrameworkElement content && content.ActualHeight > 1
-            ? content.ActualHeight
-            : Math.Max(1, _window.ActualHeight > 1 ? _window.ActualHeight : _window.Height);
+        // 喵~ 用窗口属性值做尺寸快照，避免 Content Actual 被系统工作区压缩后偏离设计值
+        // （竖屏 Android 镜像窗口在 200% 缩放/小屏环境中会被压缩，导致 AspectRatio 错误）
+        var width = requestedWidth;
+        var height = requestedHeight;
+        var visual = ResolveVisual();
+        // 为后续 HitTest 等操作确保视觉树基础布局可用，但不用该布局的 Actual 尺寸做基准
+        EnsureLayout(visual, width, height);
         if (!double.IsFinite(width) || width <= 0)
         {
             width = 800;
