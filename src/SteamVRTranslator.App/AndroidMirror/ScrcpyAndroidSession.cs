@@ -178,6 +178,38 @@ internal sealed class ScrcpyAndroidSession : IAsyncDisposable
                 AndroidMirrorConfiguration.NormalizeMaximumSize(configuration.MaximumSize),
                 AndroidMirrorConfiguration.MinimumSize,
                 AndroidMirrorConfiguration.MaximumAllowedSize);
+            // 喵~ 用户选的 720p/900p/1080p 是"短边"目标尺寸，但 scrcpy 的 max_size 限制"长边"
+            // 需要按设备分辨率换算：scrcpy_max = 目标短边 × 设备长边 ÷ 设备短边
+            var scrcpyMaxSize = maxSize;
+            try
+            {
+                var sizeResult = await _adb.RunForDeviceAsync(
+                    device.Serial,
+                    ["shell", "wm", "size"],
+                    token);
+                var match = System.Text.RegularExpressions.Regex.Match(
+                    sizeResult.StandardOutput,
+                    @"(\d+)\s*x\s*(\d+)");
+                if (match.Success &&
+                    int.TryParse(match.Groups[1].Value, out var devW) &&
+                    int.TryParse(match.Groups[2].Value, out var devH))
+                {
+                    var longSide = Math.Max(devW, devH);
+                    var shortSide = Math.Min(devW, devH);
+                    if (shortSide > 0)
+                    {
+                        scrcpyMaxSize = Math.Max(AndroidMirrorConfiguration.MinimumSize,
+                            (int)Math.Round((double)maxSize * longSide / shortSide));
+                        _log.Info(
+                            $"[android-mirror] 设备分辨率={devW}x{devH}，" +
+                            $"短边目标={maxSize}px → scrcpy max_size={scrcpyMaxSize}px。");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Warning($"[android-mirror] 查询设备分辨率失败，使用默认 max_size={maxSize}：{ex.Message}");
+            }
             var maxFps = Math.Clamp(configuration.MaximumFramesPerSecond, 10, 120);
             var bitRate = Math.Clamp(configuration.VideoBitRateMbps, 1, 20) * 1_000_000;
             _serverProcess = _adb.StartForDevice(
@@ -194,7 +226,7 @@ internal sealed class ScrcpyAndroidSession : IAsyncDisposable
                     "audio=false",
                     "video_codec=h264",
                     $"video_bit_rate={bitRate}",
-                    $"max_size={maxSize}",
+                    $"max_size={scrcpyMaxSize}",
                     $"max_fps={maxFps}",
                     "tunnel_forward=true",
                     "send_device_meta=false",
