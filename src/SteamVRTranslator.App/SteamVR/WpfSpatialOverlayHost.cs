@@ -226,8 +226,7 @@ internal sealed class WpfWindowOverlaySource : IDisposable
             pixelHeight = Math.Max(1, pixelHeight);
             var visual = ResolveVisual();
             EnsureLayout(visual, _fallbackClientWidth, _fallbackClientHeight);
-            // 喵~ 用窗口属性尺寸做源尺寸基准，与 ReadWindowMetrics 保持一致
-            // 避免窗口被系统压缩后 Actual 偏离设计值导致纹理纵横比与 plane 不一致
+            // Keep the render source dimensions aligned with the window snapshot used by the plane.
             var sourceWidth = _fallbackClientWidth;
             var sourceHeight = _fallbackClientHeight;
             var bitmap = new RenderTargetBitmap(
@@ -606,10 +605,8 @@ internal sealed class WpfWindowOverlaySource : IDisposable
         var requestedHeight = double.IsFinite(_window.Height) && _window.Height > 1
             ? _window.Height
             : 600;
-        // 喵~ 必须在 EnsureHandle 之前读取 Window 属性——EnsureHandle 创建 HWND 后
-        // WPF 会把 Height 同步为系统 clamp 值（竖屏 954→815），导致设计尺寸丢失
+        // EnsureHandle may clamp a tall window to the desktop work area, so snapshot its design size first.
         var handle = new WindowInteropHelper(_window).EnsureHandle();
-        // 喵~ 用窗口属性值做尺寸快照，避免 Content Actual 被系统工作区压缩后偏离设计值
         var width = requestedWidth;
         var height = requestedHeight;
         var visual = ResolveVisual();

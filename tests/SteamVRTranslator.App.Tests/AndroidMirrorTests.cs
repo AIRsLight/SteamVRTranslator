@@ -29,6 +29,37 @@ public sealed class AndroidMirrorTests
     }
 
     [Theory]
+    [InlineData("Physical size: 1080x2400", 1080, 2400)]
+    [InlineData("Physical size: 1080x2400\nOverride size: 1920x720", 1920, 720)]
+    [InlineData("Display: 1600x900", 1600, 900)]
+    public void EffectiveDisplaySizePrefersOverrideAndSupportsFallbackOutput(
+        string output,
+        int expectedWidth,
+        int expectedHeight)
+    {
+        Assert.True(AndroidDisplaySizeResolver.TryParseEffectiveSize(output, out var size));
+        Assert.Equal((expectedWidth, expectedHeight), (size.Width, size.Height));
+    }
+
+    [Theory]
+    [InlineData(720, 1080, 2400, 1600)]
+    [InlineData(1080, 1116, 2480, 2400)]
+    [InlineData(1080, 600, 2400, 2400)]
+    [InlineData(900, 1440, 3200, 2000)]
+    public void ScrcpyMaximumSizeTreatsPresetAsShortEdgeWithoutUpscaling(
+        int targetShortSide,
+        int displayWidth,
+        int displayHeight,
+        int expectedMaximumSize)
+    {
+        var actual = AndroidDisplaySizeResolver.CalculateScrcpyMaximumSize(
+            targetShortSide,
+            new AndroidDisplaySize(displayWidth, displayHeight));
+
+        Assert.Equal(expectedMaximumSize, actual);
+    }
+
+    [Theory]
     [InlineData(null, AndroidVideoDecoders.Auto)]
     [InlineData("invalid", AndroidVideoDecoders.Auto)]
     [InlineData("software", AndroidVideoDecoders.Software)]
@@ -436,6 +467,11 @@ public sealed class AndroidMirrorTests
         var device = Assert.Single(devices, candidate =>
             candidate.IsOnline &&
             string.Equals(candidate.Serial, serial, StringComparison.OrdinalIgnoreCase));
+        var sizeResult = await adb.RunForDeviceAsync(device.Serial, ["shell", "wm", "size"]);
+        sizeResult.EnsureSuccess("查询 Android 显示尺寸");
+        Assert.True(AndroidDisplaySizeResolver.TryParseEffectiveSize(
+            sizeResult.StandardOutput,
+            out var displaySize));
         var log = new AppLog(Path.Combine(Path.GetTempPath(), "SteamVRTranslator-AndroidMirrorTests"));
         foreach (var maximumSize in new[] { 720, 1080 })
         {
@@ -457,7 +493,11 @@ public sealed class AndroidMirrorTests
 
             Assert.True(frame.Width > 0);
             Assert.True(frame.Height > 0);
-            Assert.Equal(maximumSize, Math.Max(frame.Width, frame.Height));
+            var expectedShortSide = Math.Min(maximumSize, displaySize.ShortSide);
+            Assert.InRange(
+                Math.Min(frame.Width, frame.Height),
+                Math.Max(1, expectedShortSide - 8),
+                expectedShortSide);
             Assert.Equal(frame.Width * frame.Height * 4, frame.BgraPixels.Length);
             Assert.Contains(frame.BgraPixels, value => value != 0);
             Assert.True(session.FramesReceived > 0);
@@ -538,7 +578,7 @@ public sealed class AndroidMirrorTests
 
         try
         {
-            SetAndroidDisplaySizeAsync(adb, serial, 2400, 600).GetAwaiter().GetResult();
+            SetAndroidDisplaySizeAsync(adb, serial, 1920, 720).GetAwaiter().GetResult();
             var firstFrame = new TaskCompletionSource<AndroidVideoFrame>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
             var session = new ScrcpyAndroidSession(runtime, log);
@@ -551,7 +591,7 @@ public sealed class AndroidMirrorTests
                     new AndroidMirrorConfiguration
                     {
                         DeviceSerial = device.Serial,
-                        MaximumSize = 1080,
+                        MaximumSize = 720,
                         MaximumFramesPerSecond = 60,
                         VideoBitRateMbps = 12
                     }).GetAwaiter().GetResult();
@@ -559,23 +599,23 @@ public sealed class AndroidMirrorTests
                     .WaitAsync(TimeSpan.FromSeconds(30))
                     .GetAwaiter()
                     .GetResult();
-                Assert.Equal((1080, 270), (wideFrame.Width, wideFrame.Height));
+                Assert.Equal((1920, 720), (wideFrame.Width, wideFrame.Height));
                 window.ConfigureForSource(wideFrame.Width, wideFrame.Height);
                 AssertVideoAndTouchAlignment(window, session, wideFrame);
 
                 var landscapeFrameTask = WaitForFrameAsync(
                     session,
-                    frame => frame.Width == 1080 && frame.Height == 540,
+                    frame => frame.Width == 1600 && frame.Height == 800,
                     TimeSpan.FromSeconds(20));
-                SetAndroidDisplaySizeAsync(adb, serial, 1800, 900).GetAwaiter().GetResult();
+                SetAndroidDisplaySizeAsync(adb, serial, 1600, 800).GetAwaiter().GetResult();
                 var landscapeFrame = landscapeFrameTask.GetAwaiter().GetResult();
                 AssertVideoAndTouchAlignment(window, session, landscapeFrame);
 
                 var portraitFrameTask = WaitForFrameAsync(
                     session,
-                    frame => frame.Width == 270 && frame.Height == 1080,
+                    frame => frame.Width == 720 && frame.Height == 1920,
                     TimeSpan.FromSeconds(20));
-                SetAndroidDisplaySizeAsync(adb, serial, 600, 2400).GetAwaiter().GetResult();
+                SetAndroidDisplaySizeAsync(adb, serial, 720, 1920).GetAwaiter().GetResult();
                 var portraitFrame = portraitFrameTask.GetAwaiter().GetResult();
                 AssertVideoAndTouchAlignment(window, session, portraitFrame);
             }

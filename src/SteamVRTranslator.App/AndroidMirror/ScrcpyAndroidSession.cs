@@ -178,8 +178,6 @@ internal sealed class ScrcpyAndroidSession : IAsyncDisposable
                 AndroidMirrorConfiguration.NormalizeMaximumSize(configuration.MaximumSize),
                 AndroidMirrorConfiguration.MinimumSize,
                 AndroidMirrorConfiguration.MaximumAllowedSize);
-            // 喵~ 用户选的 720p/900p/1080p 是"短边"目标尺寸，但 scrcpy 的 max_size 限制"长边"
-            // 需要按设备分辨率换算：scrcpy_max = 目标短边 × 设备长边 ÷ 设备短边
             var scrcpyMaxSize = maxSize;
             try
             {
@@ -187,23 +185,23 @@ internal sealed class ScrcpyAndroidSession : IAsyncDisposable
                     device.Serial,
                     ["shell", "wm", "size"],
                     token);
-                var match = System.Text.RegularExpressions.Regex.Match(
-                    sizeResult.StandardOutput,
-                    @"(\d+)\s*x\s*(\d+)");
-                if (match.Success &&
-                    int.TryParse(match.Groups[1].Value, out var devW) &&
-                    int.TryParse(match.Groups[2].Value, out var devH))
+                sizeResult.EnsureSuccess("查询 Android 显示尺寸");
+                if (AndroidDisplaySizeResolver.TryParseEffectiveSize(
+                        sizeResult.StandardOutput,
+                        out var displaySize))
                 {
-                    var longSide = Math.Max(devW, devH);
-                    var shortSide = Math.Min(devW, devH);
-                    if (shortSide > 0)
-                    {
-                        scrcpyMaxSize = Math.Max(AndroidMirrorConfiguration.MinimumSize,
-                            (int)Math.Round((double)maxSize * longSide / shortSide));
-                        _log.Info(
-                            $"[android-mirror] 设备分辨率={devW}x{devH}，" +
-                            $"短边目标={maxSize}px → scrcpy max_size={scrcpyMaxSize}px。");
-                    }
+                    scrcpyMaxSize = AndroidDisplaySizeResolver.CalculateScrcpyMaximumSize(
+                        maxSize,
+                        displaySize);
+                    _log.Info(
+                        $"[android-mirror] 有效显示分辨率={displaySize.Width}x{displaySize.Height}，" +
+                        $"短边目标={maxSize}px，scrcpy max_size={scrcpyMaxSize}px。");
+                }
+                else
+                {
+                    _log.Warning(
+                        $"[android-mirror] 无法解析 Android 显示尺寸，使用默认 max_size={maxSize}：" +
+                        sizeResult.StandardOutput.Trim());
                 }
             }
             catch (Exception ex)
@@ -244,7 +242,8 @@ internal sealed class ScrcpyAndroidSession : IAsyncDisposable
             Publish(AppLocalization.Format("AndroidMirror.Status.Waiting", device.DisplayName));
             _log.Info(
                 $"[android-mirror] 会话已启动：设备={device.Serial}，端口={_forwardedPort}，" +
-                $"上限={maxSize}px/{maxFps}fps/{configuration.VideoBitRateMbps}Mbps。");
+                $"短边目标={maxSize}px，编码长边上限={scrcpyMaxSize}px，" +
+                $"{maxFps}fps/{configuration.VideoBitRateMbps}Mbps。");
         }
         catch
         {

@@ -8,11 +8,12 @@ namespace SteamVRTranslator.App.Tests;
 public sealed class SteamVrManifestTests
 {
     [Fact]
-    public void ResultsUseRightStickForScrollingAndVisibilityToggle()
+    public void GlobalToggleAndResultsScrollingUseRightStickWithoutSharingPriority()
     {
         var assembly = typeof(SteamVrManifestStore).Assembly;
         var actions = ReadResource(assembly, "translator_actions.json");
-        Assert.Contains("/actions/results/in/toggle_visibility", actions);
+        Assert.Contains("/actions/global/in/toggle_visibility", actions);
+        Assert.DoesNotContain("/actions/results/in/toggle_visibility", actions);
         Assert.Contains("/actions/results/in/left_pointer_click", actions);
         Assert.Contains("/actions/results/in/right_pointer_click", actions);
 
@@ -27,10 +28,13 @@ public sealed class SteamVrManifestTests
         {
             var json = ReadResource(assembly, binding);
             using var _ = JsonDocument.Parse(json);
-            Assert.Contains("/actions/results/in/scroll", json);
-            Assert.Contains("/actions/results/in/toggle_visibility", json);
-            Assert.Contains("/actions/results/in/left_pointer_click", ResultsSection(json));
-            Assert.Contains("/actions/results/in/right_pointer_click", ResultsSection(json));
+            var global = BindingSection(json, "/actions/global");
+            var results = BindingSection(json, "/actions/results");
+            Assert.Contains("/actions/global/in/toggle_visibility", global);
+            Assert.Contains("/actions/results/in/scroll", results);
+            Assert.DoesNotContain("toggle_visibility", results);
+            Assert.Contains("/actions/results/in/left_pointer_click", results);
+            Assert.Contains("/actions/results/in/right_pointer_click", results);
         }
     }
 
@@ -71,11 +75,11 @@ public sealed class SteamVrManifestTests
         {
             var json = ReadResource(assembly, binding);
             using var _ = JsonDocument.Parse(json);
-            Assert.Contains("/actions/results/in/left_grip", json);
-            Assert.Contains("/actions/results/in/right_grip", json);
-            Assert.Contains("/actions/results/in/toggle_visibility", json);
-            Assert.Contains("/actions/results/in/left_pointer_click", json);
-            Assert.Contains("/actions/results/in/right_pointer_click", json);
+            var results = BindingSection(json, "/actions/results");
+            Assert.Contains("/actions/results/in/left_grip", results);
+            Assert.Contains("/actions/results/in/right_grip", results);
+            Assert.Contains("/actions/results/in/left_pointer_click", results);
+            Assert.Contains("/actions/results/in/right_pointer_click", results);
         }
     }
 
@@ -87,11 +91,13 @@ public sealed class SteamVrManifestTests
         return reader.ReadToEnd();
     }
 
-    private static string ResultsSection(string json)
+    private static string BindingSection(string json, string actionSet)
     {
-        var marker = "\"/actions/results\"";
-        var index = json.IndexOf(marker, StringComparison.Ordinal);
-        return index < 0 ? string.Empty : json[index..];
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement
+            .GetProperty("bindings")
+            .GetProperty(actionSet)
+            .GetRawText();
     }
 
 }

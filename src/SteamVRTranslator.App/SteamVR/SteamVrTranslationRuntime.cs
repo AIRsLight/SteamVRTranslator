@@ -27,7 +27,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
     private const string LeftHapticActionPath = "/actions/selection/out/left_haptic";
     private const string RightHapticActionPath = "/actions/selection/out/right_haptic";
     private const string ResultScrollActionPath = "/actions/results/in/scroll";
-    private const string ResultClickActionPath = "/actions/results/in/toggle_visibility";
+    private const string OverlayToggleActionPath = "/actions/global/in/toggle_visibility";
     private const string LeftGripActionPath = "/actions/results/in/left_grip";
     private const string RightGripActionPath = "/actions/results/in/right_grip";
     private const string LeftPointerClickActionPath = "/actions/results/in/left_pointer_click";
@@ -151,7 +151,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
     private ulong _leftHapticActionHandle = OpenVR.k_ulInvalidActionHandle;
     private ulong _rightHapticActionHandle = OpenVR.k_ulInvalidActionHandle;
     private ulong _resultScrollActionHandle = OpenVR.k_ulInvalidActionHandle;
-    private ulong _resultClickActionHandle = OpenVR.k_ulInvalidActionHandle;
+    private ulong _overlayToggleActionHandle = OpenVR.k_ulInvalidActionHandle;
     private ulong _leftGripActionHandle = OpenVR.k_ulInvalidActionHandle;
     private ulong _rightGripActionHandle = OpenVR.k_ulInvalidActionHandle;
     private ulong _leftPointerClickActionHandle = OpenVR.k_ulInvalidActionHandle;
@@ -2975,7 +2975,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         ResolveAction(LeftHapticActionPath, ref _leftHapticActionHandle);
         ResolveAction(RightHapticActionPath, ref _rightHapticActionHandle);
         ResolveAction(ResultScrollActionPath, ref _resultScrollActionHandle);
-        ResolveAction(ResultClickActionPath, ref _resultClickActionHandle);
+        ResolveAction(OverlayToggleActionPath, ref _overlayToggleActionHandle);
         ResolveAction(LeftGripActionPath, ref _leftGripActionHandle);
         ResolveAction(RightGripActionPath, ref _rightGripActionHandle);
         ResolveAction(LeftPointerClickActionPath, ref _leftPointerClickActionHandle);
@@ -3094,12 +3094,12 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             });
         }
 
-        // 喵~ 仅在真正与叠加层交互（接触或抓握）时才激活 results 动作集，
-        // 避免叠加层存在但未交互时抢占 VR 程序的扳机/抓握/摇杆输入
-        // （overlay 全局优先级高于普通应用，激活即独占这些键位）
+        // Keep high-priority interaction actions active only while an overlay is targeted.
+        // The global visibility toggle lives in the always-active, normal-priority global set.
         if (_grabs.Count > 0 ||
             _interactionTargetOverlayId is not null ||
-            _contactOverlayIds.Count > 0)
+            _contactOverlayIds.Count > 0 ||
+            _pointerCapture is not null)
         {
             actionSets.Add(new VRActiveActionSet_t
             {
@@ -4027,7 +4027,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
 
     private void UpdateResultControls()
     {
-        var clickPressed = ReadDigital(_resultClickActionHandle);
+        var clickPressed = ReadDigital(_overlayToggleActionHandle);
         if (_interactiveOverlays.Count == 0)
         {
             if (_overlayCloseHold.IsPressed)
@@ -5229,7 +5229,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         _leftHapticActionHandle = OpenVR.k_ulInvalidActionHandle;
         _rightHapticActionHandle = OpenVR.k_ulInvalidActionHandle;
         _resultScrollActionHandle = OpenVR.k_ulInvalidActionHandle;
-        _resultClickActionHandle = OpenVR.k_ulInvalidActionHandle;
+        _overlayToggleActionHandle = OpenVR.k_ulInvalidActionHandle;
         _leftGripActionHandle = OpenVR.k_ulInvalidActionHandle;
         _rightGripActionHandle = OpenVR.k_ulInvalidActionHandle;
         _leftPointerClickActionHandle = OpenVR.k_ulInvalidActionHandle;
