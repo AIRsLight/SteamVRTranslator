@@ -9,6 +9,11 @@ public sealed class AppLocalization : INotifyPropertyChanged
 {
     private static readonly IReadOnlyDictionary<string, string> English = new Dictionary<string, string>
     {
+        ["Dialog.MicrophoneAccessDenied.Title"] = "Microphone access blocked",
+        ["Dialog.MicrophoneAccessDenied.Message"] = "Windows denied microphone access. Open Settings > Privacy & security > Microphone and turn on both 'Microphone access' and 'Let desktop apps access your microphone', then try again.\n\nOpen microphone privacy settings now?",
+        ["Dialog.MicrophoneSettingsFailed.Title"] = "Could not open Settings",
+        ["Dialog.MicrophoneSettingsFailed.Message"] = "Open Windows Settings manually, then go to Privacy & security > Microphone.",
+        ["Voice.MicrophoneAccessDenied.Status"] = "Microphone access is blocked by Windows privacy settings.",
         ["Brand.Subtitle"] = "SteamVR companion",
         ["Common.ProjectRepository"] = "Project repository",
         ["Common.ProjectRepository.Tooltip"] = "Open the SteamVR Translator repository on GitHub.",
@@ -522,6 +527,11 @@ public sealed class AppLocalization : INotifyPropertyChanged
 
     private static readonly IReadOnlyDictionary<string, string> Chinese = new Dictionary<string, string>
     {
+        ["Dialog.MicrophoneAccessDenied.Title"] = "麦克风权限已被阻止",
+        ["Dialog.MicrophoneAccessDenied.Message"] = "Windows 已拒绝麦克风访问。请在“设置 > 隐私和安全性 > 麦克风”中，同时开启“麦克风访问”和“允许桌面应用访问麦克风”，然后重试。\n\n是否现在打开麦克风隐私设置？",
+        ["Dialog.MicrophoneSettingsFailed.Title"] = "无法打开设置",
+        ["Dialog.MicrophoneSettingsFailed.Message"] = "请手动打开 Windows 设置，然后前往“隐私和安全性 > 麦克风”。",
+        ["Voice.MicrophoneAccessDenied.Status"] = "Windows 隐私设置已阻止麦克风访问。",
         ["Provider.Type"] = "协议类型",
         ["Provider.Type.Tooltip"] = "选择此端点实际实现的请求协议。",
         ["Provider.Type.OpenAiCompatible"] = "OpenAI 兼容",
@@ -780,6 +790,11 @@ public sealed class AppLocalization : INotifyPropertyChanged
 
     private static readonly IReadOnlyDictionary<string, string> Japanese = new Dictionary<string, string>
     {
+        ["Dialog.MicrophoneAccessDenied.Title"] = "マイクへのアクセスがブロックされています",
+        ["Dialog.MicrophoneAccessDenied.Message"] = "Windows がマイクへのアクセスを拒否しました。「設定 > プライバシーとセキュリティ > マイク」で「マイクへのアクセス」と「デスクトップ アプリにマイクへのアクセスを許可する」を有効にし、再試行してください。\n\nマイクのプライバシー設定を開きますか？",
+        ["Dialog.MicrophoneSettingsFailed.Title"] = "設定を開けません",
+        ["Dialog.MicrophoneSettingsFailed.Message"] = "Windows の設定を手動で開き、「プライバシーとセキュリティ > マイク」へ移動してください。",
+        ["Voice.MicrophoneAccessDenied.Status"] = "Windows のプライバシー設定によりマイクへのアクセスがブロックされています。",
         ["Provider.Type"] = "プロトコル",
         ["Provider.Type.Tooltip"] = "この接続先が実装するリクエスト形式を選択します。",
         ["Provider.Type.OpenAiCompatible"] = "OpenAI 互換",

@@ -72,6 +72,7 @@ public partial class MainWindow : Window
     private bool _updatingExperimentalFeatures;
     private bool _promptSettingsDirty;
     private bool _capturingDesktopVoiceHotKey;
+    private bool _microphonePrivacyDialogVisible;
     private string _activePage = "capture";
 
     public MainWindow()
@@ -1623,7 +1624,56 @@ public partial class MainWindow : Window
                 ? new SolidColorBrush(Color.FromRgb(177, 47, 52))
                 : new SolidColorBrush(Color.FromRgb(8, 126, 114));
             StateText.Text = e.State.ToString().ToUpperInvariant();
+            if (e.ErrorKind == SteamVrRuntimeErrorKind.MicrophoneAccessDenied)
+            {
+                ShowMicrophonePrivacyDialog();
+            }
         });
+    }
+
+    private void ShowMicrophonePrivacyDialog()
+    {
+        if (_microphonePrivacyDialogVisible)
+        {
+            return;
+        }
+
+        _microphonePrivacyDialogVisible = true;
+        try
+        {
+            var result = MessageBox.Show(
+                this,
+                T("Dialog.MicrophoneAccessDenied.Message"),
+                T("Dialog.MicrophoneAccessDenied.Title"),
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (result != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            try
+            {
+                Process.Start(new ProcessStartInfo("ms-settings:privacy-microphone")
+                {
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception exception)
+            {
+                _log.Error("打开 Windows 麦克风隐私设置失败。", exception);
+                MessageBox.Show(
+                    this,
+                    T("Dialog.MicrophoneSettingsFailed.Message"),
+                    T("Dialog.MicrophoneSettingsFailed.Title"),
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+        }
+        finally
+        {
+            _microphonePrivacyDialogVisible = false;
+        }
     }
 
     private void OnControlPanelStateChanged(object? sender, VrControlPanelStateChangedEventArgs e)

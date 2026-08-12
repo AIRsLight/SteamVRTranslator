@@ -1327,6 +1327,16 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         {
             _commandRecordingError = exception;
             _log.Error("无法开始语音命令录音；短按翻译仍可使用。", exception);
+            if (WasapiErrorClassifier.IsMicrophoneAccessDenied(exception))
+            {
+                Publish(
+                    L("Voice.MicrophoneAccessDenied.Status"),
+                    SelectionState.Idle,
+                    true,
+                    SteamVrRuntimeErrorKind.MicrophoneAccessDenied);
+                return;
+            }
+
             Publish(
                 isConversation
                     ? L("Command.MicrophoneFollowUpUnavailable")
@@ -2751,6 +2761,16 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         {
             _voiceInputPressed = false;
             _log.Error("[voice-input] 启动录音失败。", exception);
+            if (WasapiErrorClassifier.IsMicrophoneAccessDenied(exception))
+            {
+                Publish(
+                    L("Voice.MicrophoneAccessDenied.Status"),
+                    _selection.Snapshot.State,
+                    true,
+                    SteamVrRuntimeErrorKind.MicrophoneAccessDenied);
+                return;
+            }
+
             Publish(LF("Voice.RecordFailed", exception.Message), _selection.Snapshot.State, true);
         }
     }
@@ -5270,7 +5290,11 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
     private static string LF(string key, params object?[] args) =>
         AppLocalization.Format(key, args);
 
-    private void Publish(string message, SelectionState state, bool isError = false)
+    private void Publish(
+        string message,
+        SelectionState state,
+        bool isError = false,
+        SteamVrRuntimeErrorKind errorKind = SteamVrRuntimeErrorKind.None)
     {
         var logMessage = $"{DiagnosticTag()} [state] [{state}] {message}";
         if (isError)
@@ -5282,7 +5306,9 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             _log.Info(logMessage);
         }
 
-        StatusChanged?.Invoke(this, new SteamVrRuntimeEventArgs(message, state, isError));
+        StatusChanged?.Invoke(
+            this,
+            new SteamVrRuntimeEventArgs(message, state, isError, errorKind));
     }
 
     private string DiagnosticTag(long? operationId = null, long? requestId = null)
@@ -5527,11 +5553,20 @@ internal readonly record struct CommandButtonEvent(CommandButtonEventKind Kind, 
 public sealed class SteamVrRuntimeEventArgs(
     string message,
     SelectionState state,
-    bool isError = false) : EventArgs
+    bool isError = false,
+    SteamVrRuntimeErrorKind errorKind = SteamVrRuntimeErrorKind.None) : EventArgs
 {
     public string Message { get; } = message;
 
     public SelectionState State { get; } = state;
 
     public bool IsError { get; } = isError;
+
+    public SteamVrRuntimeErrorKind ErrorKind { get; } = errorKind;
+}
+
+public enum SteamVrRuntimeErrorKind
+{
+    None,
+    MicrophoneAccessDenied
 }

@@ -60,11 +60,33 @@ public sealed class WasapiCommandRecorder : IDisposable
             _bytesRecorded = 0;
             _capture.DataAvailable += OnDataAvailable;
             _capture.RecordingStopped += OnRecordingStopped;
-            _capture.StartRecording();
-            IsRecording = true;
-            _log.Info(
-                $"[audio] 录音开始：设备={_deviceName}，" +
-                $"格式={_capture.WaveFormat}，临时文件={Path.GetFileName(_outputPath)}");
+            try
+            {
+                _capture.StartRecording();
+                IsRecording = true;
+                _log.Info(
+                    $"[audio] 录音开始：设备={_deviceName}，" +
+                    $"格式={_capture.WaveFormat}，临时文件={Path.GetFileName(_outputPath)}");
+            }
+            catch
+            {
+                var failedOutputPath = _outputPath;
+                try
+                {
+                    CleanupCapture();
+                    if (!string.IsNullOrWhiteSpace(failedOutputPath))
+                    {
+                        File.Delete(failedOutputPath);
+                    }
+                }
+                catch (Exception cleanupException)
+                {
+                    _log.Warning(
+                        $"[audio] 录音启动失败后清理资源失败：{cleanupException.Message}");
+                }
+
+                throw;
+            }
         }
     }
 
