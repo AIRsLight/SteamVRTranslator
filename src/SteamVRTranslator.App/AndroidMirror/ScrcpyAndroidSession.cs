@@ -178,6 +178,36 @@ internal sealed class ScrcpyAndroidSession : IAsyncDisposable
                 AndroidMirrorConfiguration.NormalizeMaximumSize(configuration.MaximumSize),
                 AndroidMirrorConfiguration.MinimumSize,
                 AndroidMirrorConfiguration.MaximumAllowedSize);
+            var scrcpyMaxSize = maxSize;
+            try
+            {
+                var sizeResult = await _adb.RunForDeviceAsync(
+                    device.Serial,
+                    ["shell", "wm", "size"],
+                    token);
+                sizeResult.EnsureSuccess("查询 Android 显示尺寸");
+                if (AndroidDisplaySizeResolver.TryParseEffectiveSize(
+                        sizeResult.StandardOutput,
+                        out var displaySize))
+                {
+                    scrcpyMaxSize = AndroidDisplaySizeResolver.CalculateScrcpyMaximumSize(
+                        maxSize,
+                        displaySize);
+                    _log.Info(
+                        $"[android-mirror] 有效显示分辨率={displaySize.Width}x{displaySize.Height}，" +
+                        $"短边目标={maxSize}px，scrcpy max_size={scrcpyMaxSize}px。");
+                }
+                else
+                {
+                    _log.Warning(
+                        $"[android-mirror] 无法解析 Android 显示尺寸，使用默认 max_size={maxSize}：" +
+                        sizeResult.StandardOutput.Trim());
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Warning($"[android-mirror] 查询设备分辨率失败，使用默认 max_size={maxSize}：{ex.Message}");
+            }
             var maxFps = Math.Clamp(configuration.MaximumFramesPerSecond, 10, 120);
             var bitRate = Math.Clamp(configuration.VideoBitRateMbps, 1, 20) * 1_000_000;
             _serverProcess = _adb.StartForDevice(
@@ -194,7 +224,7 @@ internal sealed class ScrcpyAndroidSession : IAsyncDisposable
                     "audio=false",
                     "video_codec=h264",
                     $"video_bit_rate={bitRate}",
-                    $"max_size={maxSize}",
+                    $"max_size={scrcpyMaxSize}",
                     $"max_fps={maxFps}",
                     "tunnel_forward=true",
                     "send_device_meta=false",
@@ -212,7 +242,8 @@ internal sealed class ScrcpyAndroidSession : IAsyncDisposable
             Publish(AppLocalization.Format("AndroidMirror.Status.Waiting", device.DisplayName));
             _log.Info(
                 $"[android-mirror] 会话已启动：设备={device.Serial}，端口={_forwardedPort}，" +
-                $"上限={maxSize}px/{maxFps}fps/{configuration.VideoBitRateMbps}Mbps。");
+                $"短边目标={maxSize}px，编码长边上限={scrcpyMaxSize}px，" +
+                $"{maxFps}fps/{configuration.VideoBitRateMbps}Mbps。");
         }
         catch
         {

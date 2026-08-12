@@ -5,7 +5,8 @@
   "bindings": {
     "/actions/global": {
       "sources": [
-        { "path": "/user/hand/left/input/joystick", "mode": "button", "inputs": { "click": { "output": "/actions/global/in/toggle" } } }
+        { "path": "/user/hand/left/input/joystick", "mode": "button", "inputs": { "click": { "output": "/actions/global/in/toggle" } } },
+        { "path": "/user/hand/right/input/joystick", "mode": "button", "inputs": { "click": { "output": "/actions/global/in/toggle_visibility" } } }
       ]
     },
     "/actions/selection": {
@@ -20,7 +21,7 @@
     },
     "/actions/results": {
       "sources": [
-        { "path": "/user/hand/right/input/joystick", "mode": "joystick", "inputs": { "position": { "output": "/actions/results/in/scroll" }, "click": { "output": "/actions/results/in/toggle_visibility" } } },
+        { "path": "/user/hand/right/input/joystick", "mode": "joystick", "inputs": { "position": { "output": "/actions/results/in/scroll" } } },
         { "path": "/user/hand/left/input/grip", "mode": "trigger", "inputs": { "click": { "output": "/actions/results/in/left_grip" } } },
         { "path": "/user/hand/right/input/grip", "mode": "trigger", "inputs": { "click": { "output": "/actions/results/in/right_grip" } } },
         { "path": "/user/hand/left/input/trigger", "mode": "trigger", "inputs": { "click": { "output": "/actions/results/in/left_pointer_click" } } },

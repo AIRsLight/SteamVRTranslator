@@ -226,12 +226,9 @@ internal sealed class WpfWindowOverlaySource : IDisposable
             pixelHeight = Math.Max(1, pixelHeight);
             var visual = ResolveVisual();
             EnsureLayout(visual, _fallbackClientWidth, _fallbackClientHeight);
-            var sourceWidth = visual is FrameworkElement element && element.ActualWidth > 1
-                ? element.ActualWidth
-                : _fallbackClientWidth;
-            var sourceHeight = visual is FrameworkElement content && content.ActualHeight > 1
-                ? content.ActualHeight
-                : _fallbackClientHeight;
+            // Keep the render source dimensions aligned with the window snapshot used by the plane.
+            var sourceWidth = _fallbackClientWidth;
+            var sourceHeight = _fallbackClientHeight;
             var bitmap = new RenderTargetBitmap(
                 pixelWidth,
                 pixelHeight,
@@ -602,21 +599,23 @@ internal sealed class WpfWindowOverlaySource : IDisposable
 
     private WpfWindowMetrics ReadWindowMetrics()
     {
-        var handle = new WindowInteropHelper(_window).EnsureHandle();
-        var visual = ResolveVisual();
         var requestedWidth = double.IsFinite(_window.Width) && _window.Width > 1
             ? _window.Width
             : 800;
         var requestedHeight = double.IsFinite(_window.Height) && _window.Height > 1
             ? _window.Height
             : 600;
-        EnsureLayout(visual, requestedWidth, requestedHeight);
-        var width = visual is FrameworkElement element && element.ActualWidth > 1
-            ? element.ActualWidth
-            : Math.Max(1, _window.ActualWidth > 1 ? _window.ActualWidth : _window.Width);
-        var height = visual is FrameworkElement content && content.ActualHeight > 1
-            ? content.ActualHeight
-            : Math.Max(1, _window.ActualHeight > 1 ? _window.ActualHeight : _window.Height);
+        // EnsureHandle may clamp a tall window to the desktop work area, so snapshot its design size first.
+        var handle = new WindowInteropHelper(_window).EnsureHandle();
+        var width = requestedWidth;
+        var height = requestedHeight;
+        var visual = ResolveVisual();
+        if (visual is FrameworkElement element)
+        {
+            element.InvalidateMeasure();
+            element.InvalidateArrange();
+        }
+        EnsureLayout(visual, width, height);
         if (!double.IsFinite(width) || width <= 0)
         {
             width = 800;
