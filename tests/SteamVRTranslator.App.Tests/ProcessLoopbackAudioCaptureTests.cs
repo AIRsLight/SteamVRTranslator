@@ -28,35 +28,39 @@ public sealed class ProcessLoopbackAudioCaptureTests
         try
         {
             var log = new AppLog(directory);
-            var segmentReady = new TaskCompletionSource<ProcessLoopbackAudioSegment>(
-                TaskCreationOptions.RunContinuationsAsynchronously);
-            await using var capture = new ProcessLoopbackAudioCapture(
-                unchecked((uint)Environment.ProcessId),
-                log);
-            capture.SegmentReady += (_, segment) => segmentReady.TrySetResult(segment);
-            await capture.StartAsync(CancellationToken.None);
-
-            using var output = new WaveOutEvent();
-            var tone = new SignalGenerator(44100, 2)
+            for (var attempt = 0; attempt < 2; attempt++)
             {
-                Frequency = 440,
-                Gain = 0.2,
-                Type = SignalGeneratorType.Sin
-            };
-            output.Init(new OffsetSampleProvider(tone)
-            {
-                Take = TimeSpan.FromSeconds(1)
-            });
-            output.Play();
-            await Task.Delay(TimeSpan.FromSeconds(1.25));
-            await capture.DisposeAsync();
+                var segmentReady = new TaskCompletionSource<ProcessLoopbackAudioSegment>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                await using var capture = new ProcessLoopbackAudioCapture(
+                    unchecked((uint)Environment.ProcessId),
+                    log);
+                capture.SegmentReady += (_, segment) => segmentReady.TrySetResult(segment);
+                await capture.StartAsync(CancellationToken.None);
 
-            var segment = await segmentReady.Task.WaitAsync(TimeSpan.FromSeconds(3));
-            Assert.True(segment.PcmBytes.Length > segment.Format.AverageBytesPerSecond / 2);
-            Assert.True(segment.End > segment.Start);
-            Assert.Contains(
-                "已开始捕获进程音频",
-                await File.ReadAllTextAsync(log.FilePath));
+                using var output = new WaveOutEvent();
+                var tone = new SignalGenerator(44100, 2)
+                {
+                    Frequency = 440,
+                    Gain = 0.2,
+                    Type = SignalGeneratorType.Sin
+                };
+                output.Init(new OffsetSampleProvider(tone)
+                {
+                    Take = TimeSpan.FromSeconds(1)
+                });
+                output.Play();
+                // A pause must produce a segment while listening is still active, including
+                // when the target stops rendering packets. Repeating also covers restart.
+                var segment = await segmentReady.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.False(capture.Completion.IsCompleted);
+                await capture.DisposeAsync();
+                Assert.True(segment.PcmBytes.Length > segment.Format.AverageBytesPerSecond / 2);
+                Assert.True(segment.End > segment.Start);
+                Assert.Contains(
+                    "已开始捕获进程音频",
+                    await File.ReadAllTextAsync(log.FilePath));
+            }
         }
         finally
         {

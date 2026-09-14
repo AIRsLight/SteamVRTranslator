@@ -138,6 +138,9 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
     private Exception? _commandRecordingError;
     private AssistantRequestMode _pendingSubmissionMode = AssistantRequestMode.Translate;
     private Task<SenseVoiceCommandTranscriber>? _speechWarmupTask;
+    private readonly object _speechWarmupSync = new();
+    private readonly CancellationTokenSource _speechLifetime = new();
+    private bool _speechDisposing;
     private string? _lastConnectionError;
     private string? _lastPassiveWaitStatus;
     private bool _waitForSteamVrShutdown;
@@ -915,6 +918,10 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
 
     public async ValueTask DisposeAsync()
     {
+        lock (_speechWarmupSync)
+        {
+            if (!_speechDisposing) { _speechDisposing = true; _speechLifetime.Cancel(); }
+        }
         await StopAsync();
         if (_voiceInputTask is not null)
         {
@@ -946,12 +953,13 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         {
             try
             {
-                (await _speechWarmupTask).Dispose();
+                await (await _speechWarmupTask).DisposeAsync();
             }
             catch (Exception)
             {
             }
         }
+        _speechLifetime.Dispose();
         if (_htmlResultRenderer.IsValueCreated)
         {
             await _htmlResultRenderer.Value.DisposeAsync();
@@ -1738,7 +1746,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                     $"{diagnosticTag} [audio] 录音文件可用：" +
                     $"持续={audio.Duration.TotalMilliseconds:F0} ms，" +
                     $"字节={new FileInfo(audio.FilePath).Length:N0}");
-                var transcriber = await GetSpeechTranscriberAsync();
+                var transcriber = await GetSpeechTranscriberAsync(cancellationToken);
                 var transcription = await transcriber.TranscribeAsync(
                     audio,
                     diagnosticTag,
@@ -2660,38 +2668,40 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             0f);
     }
 
-    private void StartSpeechWarmup()
+    private Task<SenseVoiceCommandTranscriber> StartSpeechWarmup()
     {
-        if (_speechWarmupTask is not null)
+        lock (_speechWarmupSync)
         {
-            return;
-        }
+            ObjectDisposedException.ThrowIf(_speechDisposing, this);
+            if (_speechWarmupTask is { IsFaulted: false, IsCanceled: false }) return _speechWarmupTask;
 
-        var stopwatch = Stopwatch.StartNew();
-        _log.Info("[asr] 开始后台预热 SenseVoice。");
-        _speechWarmupTask = Task.Run(() =>
-            new SenseVoiceCommandTranscriber(_configuration.Speech, _log));
-        _ = _speechWarmupTask.ContinueWith(
-            _ =>
-            {
-                stopwatch.Stop();
-                _log.Info($"[asr] 后台预热完成：耗时={stopwatch.Elapsed.TotalMilliseconds:F0} ms。");
-            },
-            CancellationToken.None,
-            TaskContinuationOptions.OnlyOnRanToCompletion,
-            TaskScheduler.Default);
-        _ = _speechWarmupTask.ContinueWith(
-            task =>
-            {
-                stopwatch.Stop();
-                _log.Error(
-                    $"[asr] SenseVoice 后台预热失败：耗时={stopwatch.Elapsed.TotalMilliseconds:F0} ms。" +
-                    "普通短按翻译仍可使用；长按命令将报告此错误。",
-                    task.Exception?.GetBaseException());
-            },
-            CancellationToken.None,
-            TaskContinuationOptions.OnlyOnFaulted,
-            TaskScheduler.Default);
+            var stopwatch = Stopwatch.StartNew();
+            _log.Info("[asr] 开始后台预热 SenseVoice。");
+            _speechWarmupTask = Task.Run(() =>
+                new SenseVoiceCommandTranscriber(_configuration.Speech, _log, _speechLifetime.Token));
+            _ = _speechWarmupTask.ContinueWith(
+                _ =>
+                {
+                    stopwatch.Stop();
+                    _log.Info($"[asr] 后台预热完成：耗时={stopwatch.Elapsed.TotalMilliseconds:F0} ms。");
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnRanToCompletion,
+                TaskScheduler.Default);
+            _ = _speechWarmupTask.ContinueWith(
+                task =>
+                {
+                    stopwatch.Stop();
+                    _log.Error(
+                        $"[asr] SenseVoice 后台预热失败：耗时={stopwatch.Elapsed.TotalMilliseconds:F0} ms。" +
+                        "普通短按翻译仍可使用；长按命令将报告此错误。",
+                        task.Exception?.GetBaseException());
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted,
+                TaskScheduler.Default);
+            return _speechWarmupTask;
+        }
     }
 
     private void UpdateVrChatVoiceInput(bool physicallyPressed, CancellationToken cancellationToken)
@@ -2799,7 +2809,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             _log.Info(
                 $"[voice-input] PTT 松开：录音={audio.Duration.TotalMilliseconds:F0} ms，开始 SenseVoice 识别。");
             Publish(L("Voice.Recognizing"), _selection.Snapshot.State);
-            var transcriber = await GetSpeechTranscriberAsync();
+            var transcriber = await GetSpeechTranscriberAsync(cancellationToken);
             var result = await transcriber.TranscribeAsync(audio, "[voice-input]", cancellationToken);
             if (_vrChatOscOutput is null)
             {
@@ -2926,13 +2936,13 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
     private static string PreviewText(string text) =>
         text.Length <= 120 ? text : text[..120] + "...";
 
-    private async Task<SenseVoiceCommandTranscriber> GetSpeechTranscriberAsync()
+    private async Task<SenseVoiceCommandTranscriber> GetSpeechTranscriberAsync(CancellationToken cancellationToken)
     {
-        StartSpeechWarmup();
         try
         {
-            return await _speechWarmupTask!;
+            return await StartSpeechWarmup().WaitAsync(cancellationToken);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception exception)
         {
             throw new InvalidOperationException(

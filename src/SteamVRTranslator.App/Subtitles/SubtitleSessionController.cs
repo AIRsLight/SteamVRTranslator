@@ -1,5 +1,6 @@
 using System.Diagnostics;
-using System.Threading.Channels;
+using System.Text.Json;
+using System.Windows.Threading;
 using NAudio.Wave;
 using SteamVRTranslator.App.Configuration;
 using SteamVRTranslator.App.Diagnostics;
@@ -8,151 +9,252 @@ using SteamVRTranslator.App.Translation;
 
 namespace SteamVRTranslator.App.Subtitles;
 
-public sealed class SubtitleSessionController : IDisposable
+public sealed class SubtitleSessionController : IAsyncDisposable
 {
     private AppConfiguration _configuration;
     private readonly AppLog _log;
     private readonly HttpClient _httpClient;
     private readonly SubtitleAudioProcessor _audioProcessor;
     private readonly ProviderConcurrencyLimiter _providerConcurrency = new();
-    private readonly SpeakerIdentityRegistry _speakerRegistry = new();
-    private readonly Dictionary<string, int> _vibeVoiceSpeakers =
-        new(StringComparer.OrdinalIgnoreCase);
-    private SenseVoiceCommandTranscriber? _transcriber;
-    private VibeVoiceApiTranscriber? _vibeVoiceTranscriber;
-    private CancellationTokenSource? _listeningCancellation;
-    private Task? _captureMonitorTask;
-    private Task? _segmentProcessorTask;
-    private ProcessLoopbackAudioCapture? _liveCapture;
-    private Channel<QueuedLiveSegment>? _liveSegments;
-    private Stopwatch? _liveStopwatch;
-    private uint _capturedProcessId;
+    private readonly SemaphoreSlim _lifecycle = new(1, 1);
+    private readonly CancellationTokenSource _lifetime = new();
+    private readonly object _sync = new();
+    private readonly Dispatcher? _dispatcher = Dispatcher.FromThread(Thread.CurrentThread);
+    private readonly Func<uint, ISubtitleAudioCapture> _createCapture;
+    private readonly Func<SpeechConfiguration, CancellationToken, ISubtitleLocalTranscriber> _createLocal;
+    private readonly TimeSpan? _pollInterval;
+    private readonly Func<bool> _isSupported;
+    private SubtitleLiveSession? _live;
+    private CancellationTokenSource? _replayCancellation;
+    private TaskCompletionSource? _replayFinished;
+    private Task? _disposal;
     private SubtitleListeningState _listeningState = SubtitleListeningState.Stopped;
+    private uint _capturedProcessId;
+    private long _stateVersion;
     private bool _disposed;
 
-    public SubtitleSessionController(
-        AppConfiguration configuration,
-        AppLog log,
-        HttpClient httpClient)
+    public SubtitleSessionController(AppConfiguration configuration, AppLog log, HttpClient httpClient)
+        : this(configuration, log, httpClient, id => new ProcessLoopbackAudioCapture(id, log),
+            (speech, token) => new SenseVoiceCommandTranscriber(speech, log, token, SenseVoiceRequestPriority.Subtitle)) { }
+
+    internal SubtitleSessionController(AppConfiguration configuration, AppLog log, HttpClient httpClient,
+        Func<uint, ISubtitleAudioCapture> createCapture,
+        Func<SpeechConfiguration, CancellationToken, ISubtitleLocalTranscriber> createLocal,
+        Func<bool>? isSupported = null, TimeSpan? pollInterval = null, SubtitleAudioProcessor? audioProcessor = null)
     {
-        _configuration = configuration;
+        _configuration = Snapshot(configuration);
         _log = log;
         _httpClient = httpClient;
-        _audioProcessor = new SubtitleAudioProcessor(log);
+        _createCapture = createCapture;
+        _createLocal = createLocal;
+        _isSupported = isSupported ?? (() => ProcessLoopbackAudioCapture.IsSupported);
+        _pollInterval = pollInterval;
+        _audioProcessor = audioProcessor ?? new SubtitleAudioProcessor(log);
+        _audioProcessor.UpdateConfiguration(DiarizationConfiguration(_configuration));
         History = new SubtitleHistoryViewModel(configuration.Subtitles);
     }
 
     public SubtitleHistoryViewModel History { get; }
-
-    public bool IsListening => _listeningCancellation is not null;
-
-    public SubtitleListeningState ListeningState => _listeningState;
-
+    public bool IsListening => _live?.IsActive == true;
+    public SubtitleListeningState ListeningState { get { lock (_sync) return _listeningState; } }
+    public long StateVersion { get { lock (_sync) return _stateVersion; } }
     public event EventHandler<SubtitleListeningStateChangedEventArgs>? ListeningStateChanged;
 
     public void ApplyConfiguration(AppConfiguration configuration)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        _configuration = configuration;
+        Volatile.Write(ref _configuration, Snapshot(configuration));
+        _audioProcessor.UpdateConfiguration(DiarizationConfiguration(_configuration));
         History.ApplyConfiguration(configuration.Subtitles);
-        _transcriber?.Dispose();
-        _transcriber = null;
-        _vibeVoiceTranscriber?.Dispose();
-        _vibeVoiceTranscriber = null;
+        // Each processor applies the snapshot between segments, never during an ASR request.
     }
 
-    public Task StartListeningAsync(
-        Func<uint> currentSceneProcessId,
-        CancellationToken cancellationToken = default)
+    public async Task StartListeningAsync(Func<uint> currentSceneProcessId, CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(currentSceneProcessId);
-        if (IsListening)
+        await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            return Task.CompletedTask;
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (IsListening) return;
+            if (!_isSupported()) throw new PlatformNotSupportedException("进程音频字幕需要 Windows 10 build 20348 或更高版本。");
+            if (_live is not null) await _live.DisposeAsync().ConfigureAwait(false);
+            var context = new SubtitleProcessingContext(_createLocal, _log, _audioProcessor);
+            var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
+            _live = new SubtitleLiveSession(currentSceneProcessId, _createCapture,
+                token => PrepareAsync(context, token),
+                (segment, token) => ProcessSegmentAsync(context, segment, token),
+                SetListeningState, _log, linked.Token, _pollInterval,
+                async () => { try { await context.DisposeAsync().ConfigureAwait(false); } finally { linked.Dispose(); } });
+            _live.Start();
+            _log.Info("[subtitles] 实时字幕会话启动中。准备识别引擎后连接场景进程。");
         }
-        if (!ProcessLoopbackAudioCapture.IsSupported)
-        {
-            throw new PlatformNotSupportedException(
-                "进程音频字幕需要 Windows 10 build 20348 或更高版本。");
-        }
-
-        _speakerRegistry.Reset();
-        _vibeVoiceSpeakers.Clear();
-        _liveStopwatch = Stopwatch.StartNew();
-        _liveSegments = Channel.CreateBounded<QueuedLiveSegment>(
-            new BoundedChannelOptions(4)
-            {
-                FullMode = BoundedChannelFullMode.DropOldest,
-                SingleReader = true,
-                SingleWriter = false
-            });
-        _listeningCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        SetListeningState(SubtitleListeningState.WaitingForProcess, "正在等待 SteamVR 场景进程音频...");
-        _segmentProcessorTask = ProcessLiveSegmentsAsync(
-            _liveSegments.Reader,
-            _listeningCancellation.Token);
-        _captureMonitorTask = MonitorSceneProcessAsync(
-            currentSceneProcessId,
-            _listeningCancellation.Token);
-        _log.Info("[subtitles] 实时字幕监听会话已启动，等待 SteamVR 当前场景进程。");
-        return Task.CompletedTask;
+        finally { _lifecycle.Release(); }
     }
 
     public async Task StopListeningAsync()
     {
-        var cancellation = _listeningCancellation;
-        if (cancellation is null)
+        await _lifecycle.WaitAsync().ConfigureAwait(false);
+        try
         {
-            return;
+            var live = _live;
+            if (live is null) return;
+            if (live.IsActive) SetListeningState(SubtitleListeningState.Stopping, "正在停止实时字幕...", 0);
+            await live.DisposeAsync().ConfigureAwait(false);
+            _live = null;
+            SetListeningState(SubtitleListeningState.Stopped, "实时字幕监听已停止。", 0);
         }
-
-        _listeningCancellation = null;
-        cancellation.Cancel();
-        await StopCaptureAsync();
-        _liveSegments?.Writer.TryComplete();
-        await AwaitStoppedTaskAsync(_captureMonitorTask, "进程音频监听");
-        await AwaitStoppedTaskAsync(_segmentProcessorTask, "实时字幕分段处理");
-        _captureMonitorTask = null;
-        _segmentProcessorTask = null;
-        _liveSegments = null;
-        _liveStopwatch?.Stop();
-        _liveStopwatch = null;
-        _capturedProcessId = 0;
-        cancellation.Dispose();
-        SetListeningState(SubtitleListeningState.Stopped, "实时字幕监听已停止。");
-        _log.Info("[subtitles] 实时字幕监听会话已停止。");
+        finally { _lifecycle.Release(); }
     }
 
-    public async Task<SubtitleReplayResult> ReplayFileAsync(
+    public async Task StopAllAsync()
+    {
+        Task? replay;
+        lock (_sync) { _replayCancellation?.Cancel(); replay = _replayFinished?.Task; }
+        await StopListeningAsync().ConfigureAwait(false);
+        if (replay is not null) await replay.ConfigureAwait(false);
+        await _audioProcessor.ReleaseIdleModelsAsync().ConfigureAwait(false);
+    }
+
+    public async Task<SubtitleReplayResult> ReplayFileAsync(string audioPath, IProgress<double>? progress, CancellationToken cancellationToken)
+    {
+        CancellationTokenSource cancellation;
+        var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_sync)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_replayFinished?.Task.IsCompleted == false) throw new InvalidOperationException("已有音频文件正在重放，请先取消。");
+            cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
+            _replayCancellation = cancellation;
+            _replayFinished = finished;
+        }
+        try
+        {
+            return await Task.Run(async () =>
+            {
+                await using var context = new SubtitleProcessingContext(_createLocal, _log, _audioProcessor);
+                try
+                {
+                    await PrepareAsync(context, cancellation.Token).ConfigureAwait(false);
+                    return await ReplayFileCoreAsync(context, audioPath, progress, cancellation.Token).ConfigureAwait(false);
+                }
+                finally { await Task.WhenAll(context.Translations).ConfigureAwait(false); }
+            }).ConfigureAwait(false);
+        }
+        finally
+        {
+            lock (_sync)
+            {
+                _replayCancellation = null;
+                cancellation.Dispose();
+                finished.TrySetResult();
+            }
+        }
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        lock (_sync) return new ValueTask(_disposal ??= DisposeCoreAsync());
+    }
+
+    private async Task DisposeCoreAsync()
+    {
+        _disposed = true;
+        _lifetime.Cancel();
+        await StopAllAsync().ConfigureAwait(false);
+        await _audioProcessor.DisposeAsync().ConfigureAwait(false);
+        _lifetime.Dispose();
+    }
+
+    private async Task PrepareAsync(SubtitleProcessingContext context, CancellationToken token)
+    {
+        await context.ApplyConfigurationAsync(Volatile.Read(ref _configuration)).ConfigureAwait(false);
+        await context.PrepareAsync(token).ConfigureAwait(false);
+    }
+
+    private async Task ProcessSegmentAsync(SubtitleProcessingContext context, QueuedLiveSegment queued, CancellationToken token)
+    {
+        string? path = null;
+        try
+        {
+            await PrepareAsync(context, token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+            path = ApplicationDataPaths.CreateTemporaryFilePath("subtitle-live", ".wav");
+            using (var writer = new WaveFileWriter(path, queued.Segment.Format))
+                writer.Write(queued.Segment.PcmBytes, 0, queued.Segment.PcmBytes.Length);
+            await ProcessLiveFileAsync(context, path, queued, token).ConfigureAwait(false);
+        }
+        catch (NoSpeechRecognizedException) { _log.Info("[subtitles] 当前音频分段未检测到语音。继续监听。"); }
+        finally
+        {
+            if (path is not null)
+            {
+                try { File.Delete(path); }
+                catch (IOException exception) { _log.Warning($"[subtitles] 清理临时音频失败：{exception.Message}"); }
+            }
+        }
+    }
+
+    private Task<T> OnUiAsync<T>(Func<T> action, CancellationToken token)
+    {
+        if (_dispatcher is null || _dispatcher.CheckAccess())
+        {
+            token.ThrowIfCancellationRequested();
+            return Task.FromResult(action());
+        }
+        return _dispatcher.InvokeAsync(action, DispatcherPriority.DataBind, token).Task;
+    }
+
+    private void SetListeningState(SubtitleListeningState state, string message, uint processId)
+    {
+        SubtitleListeningStateChangedEventArgs args;
+        lock (_sync)
+        {
+            if (_listeningState == state && _capturedProcessId == processId && state != SubtitleListeningState.Error) return;
+            _listeningState = state;
+            _capturedProcessId = processId;
+            args = new(state, message, processId, ++_stateVersion);
+        }
+        ListeningStateChanged?.Invoke(this, args);
+    }
+
+    private static AppConfiguration Snapshot(AppConfiguration configuration)
+    {
+        var copy = JsonSerializer.Deserialize<AppConfiguration>(JsonSerializer.Serialize(configuration))!;
+        // Effective language and resolved prompts are runtime-only (JsonIgnore).
+        copy.Speech.EffectiveRecognitionLanguage = configuration.Speech.EffectiveRecognitionLanguage;
+        copy.Subtitles.TranslationSystemPrompt = configuration.Subtitles.TranslationSystemPrompt;
+        copy.Subtitles.TranslationPrompt = configuration.Subtitles.TranslationPrompt;
+        return copy;
+    }
+
+    private static SubtitleDiarizationConfiguration? DiarizationConfiguration(AppConfiguration configuration) =>
+        configuration.Subtitles.AsrBackend == SubtitleAsrBackends.VibeVoiceApi ? null : configuration.Subtitles.Diarization;
+
+    private async Task<SubtitleReplayResult> ReplayFileCoreAsync(
+        SubtitleProcessingContext context,
         string audioPath,
         IProgress<double>? progress,
         CancellationToken cancellationToken)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
         var stopwatch = Stopwatch.StartNew();
         _log.Info($"[subtitles] 文件重放开始：{audioPath}");
         if (string.Equals(
-                _configuration.Subtitles.AsrBackend,
+                context.Configuration.Subtitles.AsrBackend,
                 SubtitleAsrBackends.VibeVoiceApi,
                 StringComparison.OrdinalIgnoreCase))
         {
             return await ReplayVibeVoiceFileAsync(
+                context,
                 audioPath,
                 stopwatch,
                 progress,
                 cancellationToken);
         }
 
-        var document = await _audioProcessor.AnalyzeAsync(
-            audioPath,
-            _configuration.Subtitles.Diarization,
-            _speakerRegistry,
-            cancellationToken);
-        var transcriber = _transcriber ??= new SenseVoiceCommandTranscriber(
-            _configuration.Speech,
-            _log);
-        var translationTasks = new List<Task>();
+        var document = await context.AnalyzeAudioAsync(audioPath, cancellationToken);
+        var transcriber = context.Local!;
+        var translationTasks = context.Translations;
         var recognized = 0;
         for (var index = 0; index < document.Segments.Count; index++)
         {
@@ -175,18 +277,18 @@ public sealed class SubtitleSessionController : IDisposable
                 }
 
                 recognized++;
-                var entry = History.Add(
+                var entry = await OnUiAsync(() => History.Add(
                     segment.Speaker,
                     TimeSpan.FromSeconds(segment.StartSeconds),
                     TimeSpan.FromSeconds(segment.EndSeconds),
-                    _configuration.Subtitles.ShowOriginalText ? sourceText : string.Empty);
-                if (_configuration.Subtitles.TranslateText)
+                    context.Configuration.Subtitles.ShowOriginalText ? sourceText : string.Empty), cancellationToken).ConfigureAwait(false);
+                if (context.Configuration.Subtitles.TranslateText)
                 {
-                    translationTasks.Add(TranslateEntryAsync(entry, sourceText, cancellationToken));
+                    translationTasks.Add(TranslateEntryAsync(context, entry, sourceText, cancellationToken));
                 }
                 else
                 {
-                    entry.IsTranslating = false;
+                    await OnUiAsync(() => entry.IsTranslating = false, CancellationToken.None).ConfigureAwait(false);
                 }
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
@@ -207,164 +309,29 @@ public sealed class SubtitleSessionController : IDisposable
         return new SubtitleReplayResult(document.Segments.Count, recognized, stopwatch.Elapsed);
     }
 
-    public void Dispose()
-    {
-        if (_disposed)
-        {
-            return;
-        }
-
-        _disposed = true;
-        try
-        {
-            StopListeningAsync().GetAwaiter().GetResult();
-        }
-        catch (Exception exception)
-        {
-            _log.Error("[subtitles] 释放实时字幕监听会话失败。", exception);
-        }
-        _transcriber?.Dispose();
-        _transcriber = null;
-        _vibeVoiceTranscriber?.Dispose();
-        _vibeVoiceTranscriber = null;
-    }
-
-    private async Task MonitorSceneProcessAsync(
-        Func<uint> currentSceneProcessId,
-        CancellationToken cancellationToken)
-    {
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            try
-            {
-                var processId = currentSceneProcessId();
-                if (processId == 0)
-                {
-                    if (_capturedProcessId != 0)
-                    {
-                        await StopCaptureAsync();
-                        _capturedProcessId = 0;
-                    }
-                    SetListeningState(
-                        SubtitleListeningState.WaitingForProcess,
-                        "正在等待 SteamVR 场景进程音频...");
-                }
-                else if (processId != _capturedProcessId)
-                {
-                    await StopCaptureAsync();
-                    SetListeningState(
-                        SubtitleListeningState.Starting,
-                        $"正在连接场景进程音频 (PID {processId})...");
-                    var capture = new ProcessLoopbackAudioCapture(processId, _log);
-                    try
-                    {
-                        var baseTime = _liveStopwatch?.Elapsed ?? TimeSpan.Zero;
-                        capture.SegmentReady += (_, segment) => QueueLiveSegment(segment, baseTime);
-                        await capture.StartAsync(cancellationToken);
-                        _liveCapture = capture;
-                    }
-                    catch
-                    {
-                        await capture.DisposeAsync();
-                        throw;
-                    }
-                    _capturedProcessId = processId;
-                    SetListeningState(
-                        SubtitleListeningState.Listening,
-                        $"正在监听场景进程音频 (PID {processId})");
-                }
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception exception)
-            {
-                _log.Error("[subtitles] 连接场景进程音频失败，将自动重试。", exception);
-                SetListeningState(SubtitleListeningState.Error, exception.Message);
-                await StopCaptureAsync();
-                _capturedProcessId = 0;
-            }
-
-            await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
-        }
-    }
-
-    private void QueueLiveSegment(ProcessLoopbackAudioSegment segment, TimeSpan baseTime)
-    {
-        var channel = _liveSegments;
-        if (channel is null || !channel.Writer.TryWrite(new QueuedLiveSegment(segment, baseTime)))
-        {
-            _log.Warning("[subtitles] 实时字幕处理队列已满，已丢弃最旧音频分段。");
-        }
-    }
-
-    private async Task ProcessLiveSegmentsAsync(
-        ChannelReader<QueuedLiveSegment> reader,
-        CancellationToken cancellationToken)
-    {
-        await foreach (var queued in reader.ReadAllAsync(cancellationToken))
-        {
-            var path = Path.Combine(
-                Path.GetTempPath(),
-                "SteamVRTranslator",
-                "subtitles",
-                $"segment-{Guid.NewGuid():N}.wav");
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            using (var writer = new WaveFileWriter(path, queued.Segment.Format))
-            {
-                writer.Write(queued.Segment.PcmBytes, 0, queued.Segment.PcmBytes.Length);
-            }
-
-            try
-            {
-                await ProcessLiveFileAsync(path, queued, cancellationToken);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception exception)
-            {
-                _log.Error("[subtitles] 实时音频分段识别失败。", exception);
-                SetListeningState(SubtitleListeningState.Error, exception.Message);
-            }
-            finally
-            {
-                try
-                {
-                    File.Delete(path);
-                }
-                catch (IOException)
-                {
-                }
-            }
-        }
-    }
-
     private async Task ProcessLiveFileAsync(
+        SubtitleProcessingContext context,
         string audioPath,
         QueuedLiveSegment queued,
         CancellationToken cancellationToken)
     {
         var baseTime = queued.BaseTime;
         if (string.Equals(
-                _configuration.Subtitles.AsrBackend,
+                context.Configuration.Subtitles.AsrBackend,
                 SubtitleAsrBackends.VibeVoiceApi,
                 StringComparison.OrdinalIgnoreCase))
         {
-            var transcriber = _vibeVoiceTranscriber ??= new VibeVoiceApiTranscriber(
-                _configuration.Subtitles,
-                _log);
+            var transcriber = context.Api!;
             var result = await transcriber.TranscribeAsync(
                 audioPath,
-                _configuration.Speech.EffectiveRecognitionLanguage,
+                context.Configuration.Speech.EffectiveRecognitionLanguage,
                 "[subtitles:live:vibevoice]",
                 cancellationToken);
             foreach (var segment in result.Segments)
             {
                 await AddLiveEntryAsync(
-                    VibeVoiceSpeakerId(segment.Speaker),
+                    context,
+                    VibeVoiceSpeakerId(context, segment.Speaker),
                     baseTime + queued.Segment.Start + TimeSpan.FromSeconds(segment.StartSeconds),
                     baseTime + queued.Segment.Start + TimeSpan.FromSeconds(segment.EndSeconds),
                     segment.Text,
@@ -373,14 +340,8 @@ public sealed class SubtitleSessionController : IDisposable
             return;
         }
 
-        var document = await _audioProcessor.AnalyzeAsync(
-            audioPath,
-            _configuration.Subtitles.Diarization,
-            _speakerRegistry,
-            cancellationToken);
-        var transcriberLocal = _transcriber ??= new SenseVoiceCommandTranscriber(
-            _configuration.Speech,
-            _log);
+        var document = await context.AnalyzeAudioAsync(audioPath, cancellationToken);
+        var transcriberLocal = context.Local!;
         for (var index = 0; index < document.Segments.Count; index++)
         {
             var segment = document.Segments[index];
@@ -393,6 +354,7 @@ public sealed class SubtitleSessionController : IDisposable
                 $"[subtitles:live:{index + 1}/{document.Segments.Count}]",
                 cancellationToken);
             await AddLiveEntryAsync(
+                context,
                 segment.Speaker,
                 baseTime + queued.Segment.Start + TimeSpan.FromSeconds(segment.StartSeconds),
                 baseTime + queued.Segment.Start + TimeSpan.FromSeconds(segment.EndSeconds),
@@ -402,6 +364,7 @@ public sealed class SubtitleSessionController : IDisposable
     }
 
     private async Task AddLiveEntryAsync(
+        SubtitleProcessingContext context,
         int speaker,
         TimeSpan start,
         TimeSpan end,
@@ -414,78 +377,36 @@ public sealed class SubtitleSessionController : IDisposable
             return;
         }
 
-        var entry = History.Add(
+        var entry = await OnUiAsync(() => History.Add(
             speaker,
             start,
             end < start ? start : end,
-            _configuration.Subtitles.ShowOriginalText ? sourceText : string.Empty);
-        if (_configuration.Subtitles.TranslateText)
+            context.Configuration.Subtitles.ShowOriginalText ? sourceText : string.Empty), cancellationToken).ConfigureAwait(false);
+        if (context.Configuration.Subtitles.TranslateText)
         {
-            await TranslateEntryAsync(entry, sourceText, cancellationToken);
+            await TranslateEntryAsync(context, entry, sourceText, cancellationToken);
         }
         else
         {
-            entry.IsTranslating = false;
+            await OnUiAsync(() => entry.IsTranslating = false, CancellationToken.None).ConfigureAwait(false);
         }
-    }
-
-    private async Task StopCaptureAsync()
-    {
-        var capture = _liveCapture;
-        _liveCapture = null;
-        if (capture is not null)
-        {
-            await capture.DisposeAsync();
-        }
-    }
-
-    private async Task AwaitStoppedTaskAsync(Task? task, string description)
-    {
-        if (task is null)
-        {
-            return;
-        }
-        try
-        {
-            await task;
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (Exception exception)
-        {
-            _log.Error($"[subtitles] 停止{description}失败。", exception);
-        }
-    }
-
-    private void SetListeningState(SubtitleListeningState state, string message)
-    {
-        if (_listeningState == state && state != SubtitleListeningState.Error)
-        {
-            return;
-        }
-        _listeningState = state;
-        ListeningStateChanged?.Invoke(
-            this,
-            new SubtitleListeningStateChangedEventArgs(state, message, _capturedProcessId));
     }
 
     private async Task<SubtitleReplayResult> ReplayVibeVoiceFileAsync(
+        SubtitleProcessingContext context,
         string audioPath,
         Stopwatch stopwatch,
         IProgress<double>? progress,
         CancellationToken cancellationToken)
     {
-        _vibeVoiceSpeakers.Clear();
-        var transcriber = _vibeVoiceTranscriber ??= new VibeVoiceApiTranscriber(
-            _configuration.Subtitles,
-            _log);
+        context.ApiSpeakers.Clear();
+        var transcriber = context.Api!;
         var result = await transcriber.TranscribeAsync(
             audioPath,
-            _configuration.Speech.EffectiveRecognitionLanguage,
+            context.Configuration.Speech.EffectiveRecognitionLanguage,
             "[subtitles:vibevoice]",
             cancellationToken);
-        var translationTasks = new List<Task>();
+        var translationTasks = context.Translations;
         var recognized = 0;
         foreach (var segment in result.Segments)
         {
@@ -497,18 +418,18 @@ public sealed class SubtitleSessionController : IDisposable
             }
 
             recognized++;
-            var entry = History.Add(
-                VibeVoiceSpeakerId(segment.Speaker),
+            var entry = await OnUiAsync(() => History.Add(
+                VibeVoiceSpeakerId(context, segment.Speaker),
                 TimeSpan.FromSeconds(segment.StartSeconds),
                 TimeSpan.FromSeconds(Math.Max(segment.StartSeconds, segment.EndSeconds)),
-                _configuration.Subtitles.ShowOriginalText ? sourceText : string.Empty);
-            if (_configuration.Subtitles.TranslateText)
+                context.Configuration.Subtitles.ShowOriginalText ? sourceText : string.Empty), cancellationToken).ConfigureAwait(false);
+            if (context.Configuration.Subtitles.TranslateText)
             {
-                translationTasks.Add(TranslateEntryAsync(entry, sourceText, cancellationToken));
+                translationTasks.Add(TranslateEntryAsync(context, entry, sourceText, cancellationToken));
             }
             else
             {
-                entry.IsTranslating = false;
+                await OnUiAsync(() => entry.IsTranslating = false, CancellationToken.None).ConfigureAwait(false);
             }
         }
 
@@ -517,31 +438,32 @@ public sealed class SubtitleSessionController : IDisposable
         stopwatch.Stop();
         _log.Info(
             $"[subtitles] VibeVoice 文件重放完成：总耗时={stopwatch.Elapsed.TotalSeconds:F2}s，" +
-            $"说话人={_vibeVoiceSpeakers.Count}，有效字幕={recognized}。");
+            $"说话人={context.ApiSpeakers.Count}，有效字幕={recognized}。");
         return new SubtitleReplayResult(result.Segments.Count, recognized, stopwatch.Elapsed);
     }
 
-    private int VibeVoiceSpeakerId(string speaker)
+    private static int VibeVoiceSpeakerId(SubtitleProcessingContext context, string speaker)
     {
         var normalized = string.IsNullOrWhiteSpace(speaker) ? "A" : speaker.Trim();
-        if (_vibeVoiceSpeakers.TryGetValue(normalized, out var id))
+        if (context.ApiSpeakers.TryGetValue(normalized, out var id))
         {
             return id;
         }
 
-        id = _vibeVoiceSpeakers.Count;
-        _vibeVoiceSpeakers[normalized] = id;
+        id = context.ApiSpeakers.Count;
+        context.ApiSpeakers[normalized] = id;
         return id;
     }
 
     private async Task TranslateEntryAsync(
+        SubtitleProcessingContext context,
         SubtitleHistoryEntry entry,
         string sourceText,
         CancellationToken cancellationToken)
     {
         try
         {
-            var provider = _configuration.Translation.GetProviderFor(
+            var provider = context.Configuration.Translation.GetProviderFor(
                     PromptProviderPurpose.SubtitleTranslation)
                 ?? throw new InvalidOperationException("字幕翻译没有可用的模型提供商。");
             using var lease = await _providerConcurrency.AcquireAsync(
@@ -549,31 +471,32 @@ public sealed class SubtitleSessionController : IDisposable
                 provider.MaxConcurrency,
                 cancellationToken);
             var backend = TranslationBackendFactory.Create(
-                _configuration.Translation,
+                context.Configuration.Translation,
                 provider,
                 _httpClient,
                 textTranslationPurpose: PromptProviderPurpose.SubtitleTranslation);
             var translated = await backend.TranslateTextAsync(
                 sourceText,
-                _configuration.Subtitles.TargetLanguage,
-                _configuration.Subtitles.TranslationSystemPrompt,
-                _configuration.Subtitles.TranslationPrompt,
+                context.Configuration.Subtitles.TargetLanguage,
+                context.Configuration.Subtitles.TranslationSystemPrompt,
+                context.Configuration.Subtitles.TranslationPrompt,
                 onPartialResult: null,
                 cancellationToken);
-            entry.TranslatedText = translated?.Trim() ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(entry.TranslatedText))
+            await OnUiAsync(() =>
             {
-                entry.Error = "翻译模型没有返回文本。";
-            }
+                entry.TranslatedText = translated?.Trim() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(entry.TranslatedText)) entry.Error = "翻译模型没有返回文本。";
+                return true;
+            }, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            entry.Error = exception.Message;
+            await OnUiAsync(() => entry.Error = exception.Message, CancellationToken.None).ConfigureAwait(false);
             _log.Error($"[subtitles] 字幕翻译失败：说话人={entry.DisplaySpeaker}。", exception);
         }
         finally
         {
-            entry.IsTranslating = false;
+            await OnUiAsync(() => entry.IsTranslating = false, CancellationToken.None).ConfigureAwait(false);
         }
     }
 }
@@ -583,6 +506,7 @@ public enum SubtitleListeningState
     Stopped,
     WaitingForProcess,
     Starting,
+    Stopping,
     Listening,
     Error
 }
@@ -590,13 +514,15 @@ public enum SubtitleListeningState
 public sealed class SubtitleListeningStateChangedEventArgs(
     SubtitleListeningState state,
     string message,
-    uint processId) : EventArgs
+    uint processId, long version = 0) : EventArgs
 {
     public SubtitleListeningState State { get; } = state;
 
     public string Message { get; } = message;
 
     public uint ProcessId { get; } = processId;
+
+    public long Version { get; } = version;
 }
 
 internal sealed record QueuedLiveSegment(

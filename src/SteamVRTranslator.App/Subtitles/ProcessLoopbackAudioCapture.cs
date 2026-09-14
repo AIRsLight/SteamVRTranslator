@@ -1,10 +1,11 @@
 using System.Runtime.InteropServices;
+using System.Diagnostics;
 using NAudio.Wave;
 using SteamVRTranslator.App.Diagnostics;
 
 namespace SteamVRTranslator.App.Subtitles;
 
-internal sealed class ProcessLoopbackAudioCapture : IAsyncDisposable
+internal sealed class ProcessLoopbackAudioCapture : ISubtitleAudioCapture
 {
     private const string ProcessLoopbackDevice = "VAD\\Process_Loopback";
     private const uint SilentBufferFlag = 0x2;
@@ -22,6 +23,9 @@ internal sealed class ProcessLoopbackAudioCapture : IAsyncDisposable
     private IAudioClient? _audioClient;
     private IAudioCaptureClient? _captureClient;
     private Task? _captureTask;
+    private readonly object _lifecycleSync = new();
+    private Task? _startTask;
+    private Task? _disposeTask;
     private bool _disposed;
 
     public ProcessLoopbackAudioCapture(uint processId, AppLog log)
@@ -40,7 +44,19 @@ internal sealed class ProcessLoopbackAudioCapture : IAsyncDisposable
     public static bool IsSupported =>
         OperatingSystem.IsWindowsVersionAtLeast(10, 0, MinimumSupportedWindowsBuild);
 
-    public async Task StartAsync(CancellationToken cancellationToken)
+    public Task Completion => _captureTask ?? Task.CompletedTask;
+
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        lock (_lifecycleSync)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_startTask is not null) throw new InvalidOperationException("进程音频捕获已经启动。");
+            return _startTask = StartCoreAsync(cancellationToken);
+        }
+    }
+
+    private async Task StartCoreAsync(CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (!IsSupported)
@@ -53,7 +69,10 @@ internal sealed class ProcessLoopbackAudioCapture : IAsyncDisposable
             throw new InvalidOperationException("进程音频捕获已经启动。");
         }
 
-        _audioClient = await ActivateAudioClientAsync(_processId, cancellationToken);
+        using var starting = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _cancellation.Token);
+        starting.Token.ThrowIfCancellationRequested();
+        _audioClient = await ActivateAudioClientAsync(_processId, starting.Token).ConfigureAwait(false);
+        starting.Token.ThrowIfCancellationRequested();
         var format = WaveFormat.CreateCustomFormat(
             WaveFormatEncoding.Pcm,
             sampleRate: 44100,
@@ -74,7 +93,7 @@ internal sealed class ProcessLoopbackAudioCapture : IAsyncDisposable
                 0,
                 0,
                 formatPointer,
-                Guid.Empty);
+                IntPtr.Zero);
             Marshal.ThrowExceptionForHR(result);
         }
         finally
@@ -107,21 +126,29 @@ internal sealed class ProcessLoopbackAudioCapture : IAsyncDisposable
         _log.Info($"[subtitles] 已开始捕获进程音频：PID={_processId}，格式={format}。");
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        if (_disposed)
+        lock (_lifecycleSync)
         {
-            return;
+            _disposed = true;
+            return new ValueTask(_disposeTask ??= DisposeCoreAsync());
         }
+    }
 
-        _disposed = true;
+    private async Task DisposeCoreAsync()
+    {
         _cancellation.Cancel();
+        if (_startTask is not null)
+        {
+            try { await _startTask.ConfigureAwait(false); }
+            catch (Exception) { /* Startup failure is reported by StartAsync. */ }
+        }
         _sampleReady.Set();
         if (_captureTask is not null)
         {
             try
             {
-                await _captureTask;
+                await _captureTask.ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -154,16 +181,26 @@ internal sealed class ProcessLoopbackAudioCapture : IAsyncDisposable
         using (linked)
         {
             var waitHandles = new[] { _sampleReady, linked.Token.WaitHandle };
+            var clock = Stopwatch.StartNew();
+            var lastPacket = TimeSpan.Zero;
             try
             {
                 while (!linked.IsCancellationRequested)
                 {
-                    if (WaitHandle.WaitAny(waitHandles) != 0)
+                    if (WaitHandle.WaitAny(waitHandles, 100) == 1 || linked.IsCancellationRequested)
                     {
                         break;
                     }
 
-                    DrainPackets(format);
+                    if (DrainPackets(format)) lastPacket = clock.Elapsed;
+                    else if (clock.Elapsed - lastPacket >= TimeSpan.FromSeconds(0.65))
+                    {
+                        // Some applications stop producing packets entirely after speaking.
+                        // Silence must still finish a segment without requiring Stop Listening.
+                        var segment = _segmenter.Flush(format);
+                        if (segment is not null) SegmentReady?.Invoke(this, segment);
+                        _segmenter.SkipToFrame((long)(clock.Elapsed.TotalSeconds * format.SampleRate));
+                    }
                 }
             }
             finally
@@ -177,19 +214,20 @@ internal sealed class ProcessLoopbackAudioCapture : IAsyncDisposable
         }
     }
 
-    private void DrainPackets(WaveFormat format)
+    private bool DrainPackets(WaveFormat format)
     {
         if (_captureClient is null)
         {
-            return;
+            return false;
         }
 
-        while (true)
+        var received = false;
+        while (!_cancellation.IsCancellationRequested)
         {
             Marshal.ThrowExceptionForHR(_captureClient.GetNextPacketSize(out var packetFrames));
             if (packetFrames == 0)
             {
-                return;
+                return received;
             }
 
             IntPtr data = IntPtr.Zero;
@@ -203,6 +241,7 @@ internal sealed class ProcessLoopbackAudioCapture : IAsyncDisposable
                     out _,
                     out _));
                 var byteCount = checked((int)frames * format.BlockAlign);
+                received = true;
                 var buffer = new byte[byteCount];
                 if ((flags & SilentBufferFlag) == 0 && data != IntPtr.Zero)
                 {
@@ -223,6 +262,7 @@ internal sealed class ProcessLoopbackAudioCapture : IAsyncDisposable
                 }
             }
         }
+        return received;
     }
 
     private static async Task<IAudioClient> ActivateAudioClientAsync(
@@ -263,25 +303,34 @@ internal sealed class ProcessLoopbackAudioCapture : IAsyncDisposable
                 out operation));
             try
             {
-                return await completion.Task.WaitAsync(cancellationToken);
+                return await completion.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch (Exception exception) when (exception is OperationCanceledException or TimeoutException)
             {
-                // The native activation still owns the PROPVARIANT until its callback runs.
-                // Wait for that callback before freeing the activation blob.
-                try
-                {
-                    await completion.Task;
-                }
-                catch (Exception)
-                {
-                }
+                // Native activation cannot be cancelled. Retain its parameters until the
+                // late callback, then release the unused client without blocking shutdown.
+                _ = ReleaseAbandonedActivationAsync(completion, operation, activationPointer);
+                activationPointer = IntPtr.Zero;
+                operation = null;
                 throw;
             }
         }
         finally
         {
             Marshal.FreeCoTaskMem(activationPointer);
+            ReleaseComObject(operation);
+            GC.KeepAlive(completion);
+        }
+    }
+
+    private static async Task ReleaseAbandonedActivationAsync(ActivationCompletionHandler completion,
+        IActivateAudioInterfaceAsyncOperation? operation, IntPtr parameters)
+    {
+        try { ReleaseComObject(await completion.Task.ConfigureAwait(false)); }
+        catch (Exception) { }
+        finally
+        {
+            Marshal.FreeCoTaskMem(parameters);
             ReleaseComObject(operation);
             GC.KeepAlive(completion);
         }
@@ -366,6 +415,13 @@ internal sealed class ProcessLoopbackAudioCapture : IAsyncDisposable
         public ProcessLoopbackAudioSegment? Flush(WaveFormat format) =>
             _isActive ? Complete(format) : null;
 
+        public void SkipToFrame(long frame)
+        {
+            _totalFrames = Math.Max(_totalFrames, frame);
+            _preRoll.Clear();
+            _preRollFrames = 0;
+        }
+
         private void AddPreRoll(byte[] data, uint frames, int sampleRate)
         {
             _preRoll.Enqueue(data);
@@ -425,24 +481,27 @@ internal sealed class ProcessLoopbackAudioCapture : IAsyncDisposable
 
         public int ActivateCompleted(IActivateAudioInterfaceAsyncOperation operation)
         {
+            object? activatedInterface = null;
             try
             {
                 Marshal.ThrowExceptionForHR(operation.GetActivateResult(
                     out var activationResult,
-                    out var activatedInterface));
+                    out activatedInterface));
                 Marshal.ThrowExceptionForHR(activationResult);
-                _completion.TrySetResult((IAudioClient)activatedInterface);
+                if (_completion.TrySetResult((IAudioClient)activatedInterface))
+                    activatedInterface = null;
             }
             catch (Exception exception)
             {
                 _completion.TrySetException(exception);
             }
+            finally { ReleaseComObject(activatedInterface); }
             return 0;
         }
 
     }
 
-    [StructLayout(LayoutKind.Sequential)]
+    [StructLayout(LayoutKind.Sequential, Pack = 2)]
     private struct WaveFormatEx
     {
         public ushort FormatTag;
@@ -557,7 +616,7 @@ internal sealed class ProcessLoopbackAudioCapture : IAsyncDisposable
             long bufferDuration,
             long periodicity,
             IntPtr format,
-            Guid audioSessionGuid);
+            IntPtr audioSessionGuid);
         [PreserveSig] int GetBufferSize(out uint bufferFrames);
         [PreserveSig] int GetStreamLatency(out long latency);
         [PreserveSig] int GetCurrentPadding(out uint paddingFrames);

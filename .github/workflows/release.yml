@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: windows-2022
@@ -60,15 +64,48 @@ jobs:
             artifacts/SHA256SUMS.txt
           if-no-files-found: error
 
-      - name: Create GitHub release
+      - name: Publish GitHub release
         if: github.ref_type == 'tag'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$env:GITHUB_REF_NAME" `
-            "artifacts/SteamVRTranslator-win-x64.zip" `
-            "artifacts/SHA256SUMS.txt" `
-            --verify-tag `
-            --title "SteamVR Translator ${{ steps.version.outputs.version }}" `
-            --generate-notes
+          $ErrorActionPreference = "Stop"
+          $tag = $env:GITHUB_REF_NAME
+          $isPrerelease = $tag.Contains("-")
+          $tagCommit = gh api "repos/$env:GITHUB_REPOSITORY/commits/$tag" --jq '.sha'
+          if ($LASTEXITCODE -ne 0 -or $tagCommit.Trim() -ne $env:GITHUB_SHA) {
+            throw "Tag moved while this build was running; refusing to publish stale assets."
+          }
+
+          $notesSource = "docs/releases/$tag.md"
+          $notesArguments = @()
+          if (Test-Path -LiteralPath $notesSource) {
+            $notesPath = Join-Path $env:RUNNER_TEMP "release-notes.md"
+            $notes = (Get-Content -LiteralPath $notesSource -Raw).TrimEnd()
+            $notes += "`n`nBuild commit: $env:GITHUB_SHA`n"
+            Set-Content -LiteralPath $notesPath -Value $notes -Encoding utf8
+            $notesArguments = @("--notes-file", $notesPath)
+          }
+
+          $existingJson = gh release view $tag --json isPrerelease,isDraft 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            $existing = $existingJson | ConvertFrom-Json
+            if (!$isPrerelease -or !$existing.isPrerelease -or $existing.isDraft) {
+              throw "Only an existing published prerelease may be overwritten."
+            }
+            gh release upload $tag `
+              "artifacts/SteamVRTranslator-win-x64.zip" `
+              "artifacts/SHA256SUMS.txt" --clobber
+            if ($LASTEXITCODE -ne 0) { throw "Release asset upload failed." }
+            gh release edit $tag --prerelease --latest=false --target $env:GITHUB_SHA @notesArguments
+            if ($LASTEXITCODE -ne 0) { throw "Release metadata update failed." }
+          } else {
+            $createArguments = @("--verify-tag", "--title", "SteamVR Translator ${{ steps.version.outputs.version }}")
+            if ($isPrerelease) { $createArguments += @("--prerelease", "--latest=false") }
+            if ($notesArguments.Count -eq 0) { $notesArguments = @("--generate-notes") }
+            gh release create $tag `
+              "artifacts/SteamVRTranslator-win-x64.zip" `
+              "artifacts/SHA256SUMS.txt" @createArguments @notesArguments
+            if ($LASTEXITCODE -ne 0) { throw "Release creation failed." }
+          }

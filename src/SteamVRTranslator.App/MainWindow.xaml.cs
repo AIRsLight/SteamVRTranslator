@@ -54,6 +54,7 @@ public partial class MainWindow : Window
     private SteamVrTranslationRuntime? _runtime;
     private long? _managerOverlayId;
     private long? _subtitleOverlayId;
+    private bool _subtitleOverlayOpening;
     private SubtitleSessionController? _subtitleSession;
     private SubtitleHistoryWindow? _subtitleHistoryWindow;
     private ScrcpyAndroidSession? _androidMirrorSession;
@@ -78,6 +79,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _voiceCuePreviewCancellation;
     private bool _voiceCuePreviewIsLocal;
     private bool _voiceCueImportBusy;
+    private bool _subtitleListeningBusy;
     private readonly VbCableInstallation _virtualMicrophoneInstallation = new();
     private readonly DispatcherTimer _virtualMicrophoneTimer = new() { Interval = TimeSpan.FromSeconds(3) };
     private VbCableStatus _virtualMicrophoneStatus = new(false, null, null);
@@ -140,7 +142,7 @@ public partial class MainWindow : Window
         _voiceCuePreviewCancellation?.Cancel();
         FlushPendingPromptSave();
         FlushPendingOscChunkIntervalSave();
-        if (_allowClose || _runtime is null)
+        if (_allowClose || (_runtime is null && _subtitleSession is null))
         {
             _subtitleHistoryWindow?.ClosePermanently();
             _subtitleHistoryWindow = null;
@@ -174,7 +176,7 @@ public partial class MainWindow : Window
         _subtitleReplayCancellation?.Dispose();
         _androidMirrorConfigurationDebounce?.Cancel();
         _androidMirrorConfigurationDebounce?.Dispose();
-        _subtitleSession?.Dispose();
+        if (_subtitleSession is { } remainingSession) _ = remainingSession.DisposeAsync().AsTask();
         _desktopVoiceHotKey.PressedChanged -= OnDesktopVoiceHotKeyPressedChanged;
         _desktopVoiceHotKey.Dispose();
         _providerHttpClient.Dispose();
@@ -1577,8 +1579,21 @@ public partial class MainWindow : Window
         }
         finally
         {
-            _allowClose = true;
-            _ = Dispatcher.BeginInvoke(Close);
+            try
+            {
+                if (_subtitleSession is { } session)
+                {
+                    session.ListeningStateChanged -= OnSubtitleListeningStateChanged;
+                    await session.DisposeAsync();
+                    _subtitleSession = null;
+                }
+            }
+            catch (Exception exception) { _log.Error("关闭字幕会话时发生错误。", exception); }
+            finally
+            {
+                _allowClose = true;
+                _ = Dispatcher.BeginInvoke(Close);
+            }
         }
     }
 
@@ -1601,7 +1616,7 @@ public partial class MainWindow : Window
             runtime.SetDesktopVoiceInputPressed(false);
             if (_subtitleSession is not null)
             {
-                await _subtitleSession.StopListeningAsync();
+                await _subtitleSession.StopAllAsync();
             }
             await StopAndroidMirrorAsync(closeOverlay: true, runtime);
             if (ReferenceEquals(_runtime, runtime))
@@ -3579,6 +3594,7 @@ public partial class MainWindow : Window
     private async Task DisableSubtitleFeatureAsync()
     {
         _subtitleReplayCancellation?.Cancel();
+        if (_subtitleSession is not null) await _subtitleSession.StopAllAsync();
         var overlayId = _subtitleOverlayId;
         _subtitleOverlayId = null;
         if (_runtime is not null && overlayId is { } id)
@@ -3889,6 +3905,7 @@ public partial class MainWindow : Window
             _configuration.ApplyPromptLanguage();
             SaveConfigurationSafely("实验性字幕文件重放");
             var session = EnsureSubtitleSession();
+            session.ApplyConfiguration(_configuration);
             var window = EnsureSubtitleHistoryWindow();
             window.Show();
             window.Activate();
@@ -3997,12 +4014,7 @@ public partial class MainWindow : Window
         {
             try
             {
-                if (!_configuration.Subtitles.Enabled)
-                {
-                    _log.Warning("[subtitles] 已忽略未启用实验性功能的 VR 控制请求。");
-                    return;
-                }
-
+                if (!ReferenceEquals(sender, _runtime) || !IsSubtitleRuntimeActive(_runtime)) return;
                 EnsureSubtitleSession().ApplyConfiguration(_configuration);
                 await ShowSubtitleHistoryVrAsync(WpfSpatialOverlayPlacement.LeftHand);
             }
@@ -4023,15 +4035,10 @@ public partial class MainWindow : Window
         {
             try
             {
-                if (!_configuration.Subtitles.Enabled)
-                {
-                    _log.Warning("[subtitles] 已忽略未启用实验性功能的 VR 控制请求。");
-                    return;
-                }
-
+                if (!ReferenceEquals(sender, _runtime) || !IsSubtitleRuntimeActive(_runtime)) return;
                 if (e.Kind == VrSubtitleControlRequestKind.ConfigurationChanged)
                 {
-                    await ApplySubtitleControlPanelConfigurationAsync(e.State);
+                    ApplySubtitleControlPanelConfiguration(e.State);
                     return;
                 }
 
@@ -4052,15 +4059,9 @@ public partial class MainWindow : Window
         }));
     }
 
-    private async Task ApplySubtitleControlPanelConfigurationAsync(VrSubtitleControlState state)
+    private void ApplySubtitleControlPanelConfiguration(VrSubtitleControlState state)
     {
         var session = EnsureSubtitleSession();
-        var restartListening = session.IsListening;
-        if (restartListening)
-        {
-            await session.StopListeningAsync();
-        }
-
         var subtitles = _configuration.Subtitles;
         subtitles.AsrBackend = SubtitleAsrBackends.Normalize(state.AsrBackend);
         subtitles.ShowOriginalText = state.ShowOriginalText;
@@ -4092,26 +4093,33 @@ public partial class MainWindow : Window
         session.ApplyConfiguration(_configuration);
         SaveConfigurationSafely("VR 控制面板字幕设置");
 
-        if (restartListening && _runtime is not null)
-        {
-            await ValidateSubtitleExperimentalEnvironmentAsync();
-            await session.StartListeningAsync(() => _runtime?.CurrentSceneProcessId ?? 0);
-        }
         PushSubtitleControlState();
     }
 
     private async Task ShowSubtitleHistoryVrAsync(WpfSpatialOverlayPlacement placement)
     {
-        if (_runtime is null || _subtitleOverlayId is not null)
+        var runtime = _runtime;
+        if (!IsSubtitleRuntimeActive(runtime) || _subtitleOverlayId is not null || _subtitleOverlayOpening)
         {
             return;
         }
 
-        var window = EnsureSubtitleHistoryWindow();
-        _subtitleOverlayId = await _runtime.ShowWindowAsync(
-            window,
-            CreateSubtitleOverlayOptions(_configuration.Subtitles, placement));
-        PushSubtitleControlState();
+        _subtitleOverlayOpening = true;
+        try
+        {
+            var window = EnsureSubtitleHistoryWindow();
+            var overlayId = await runtime!.ShowWindowAsync(
+                window,
+                CreateSubtitleOverlayOptions(_configuration.Subtitles, placement));
+            if (!IsSubtitleRuntimeActive(runtime))
+            {
+                await runtime.CloseWindowAsync(overlayId);
+                return;
+            }
+            _subtitleOverlayId = overlayId;
+            PushSubtitleControlState();
+        }
+        finally { _subtitleOverlayOpening = false; }
     }
 
     internal static WpfSpatialOverlayOptions CreateSubtitleOverlayOptions(
@@ -4155,7 +4163,7 @@ public partial class MainWindow : Window
                 OnSubtitleStartStopListeningRequested;
             _subtitleHistoryWindow.ApplyListeningState(
                 session.ListeningState,
-                SubtitleListeningStatusText(session.ListeningState));
+                SubtitleListeningStatusText(session.ListeningState), session.IsListening);
         }
 
         return _subtitleHistoryWindow;
@@ -4163,6 +4171,9 @@ public partial class MainWindow : Window
 
     private async void OnSubtitleStartStopListeningRequested(object? sender, EventArgs e)
     {
+        if (_subtitleListeningBusy || _stoppingRuntime || _closeInProgress || !_configuration.Subtitles.Enabled) return;
+        _subtitleListeningBusy = true;
+        _subtitleHistoryWindow?.SetListeningBusy(true);
         try
         {
             var session = EnsureSubtitleSession();
@@ -4172,14 +4183,15 @@ public partial class MainWindow : Window
             }
             else
             {
-                if (_runtime is null)
+                var runtime = _runtime;
+                if (!IsSubtitleRuntimeActive(runtime))
                 {
                     throw new InvalidOperationException(T("Dialog.NotStarted.Message"));
                 }
                 ApplySubtitleControlsToConfiguration();
                 session.ApplyConfiguration(_configuration);
                 SaveConfigurationSafely("开始实时字幕监听");
-                await session.StartListeningAsync(() => _runtime?.CurrentSceneProcessId ?? 0);
+                await session.StartListeningAsync(() => runtime!.CurrentSceneProcessId);
             }
             PushSubtitleControlState();
         }
@@ -4188,10 +4200,19 @@ public partial class MainWindow : Window
             _log.Error("[subtitles] 切换实时监听失败。", exception);
             _subtitleHistoryWindow?.ApplyListeningState(
                 SubtitleListeningState.Error,
-                exception.Message);
+                exception.Message, _subtitleSession?.IsListening == true);
             PushSubtitleControlState(exception.Message);
         }
+        finally
+        {
+            _subtitleListeningBusy = false;
+            _subtitleHistoryWindow?.SetListeningBusy(false);
+        }
     }
+
+    private bool IsSubtitleRuntimeActive(SteamVrTranslationRuntime? runtime) =>
+        runtime is not null && ReferenceEquals(runtime, _runtime) &&
+        !_stoppingRuntime && !_closeInProgress && _configuration.Subtitles.Enabled;
 
     private void OnSubtitleListeningStateChanged(
         object? sender,
@@ -4199,10 +4220,11 @@ public partial class MainWindow : Window
     {
         Dispatcher.BeginInvoke(() =>
         {
+            if (_subtitleSession is not { } session || !ReferenceEquals(sender, session) || e.Version != session.StateVersion) return;
             var displayMessage = e.State == SubtitleListeningState.Error
                 ? e.Message
                 : SubtitleListeningStatusText(e.State);
-            _subtitleHistoryWindow?.ApplyListeningState(e.State, displayMessage);
+            _subtitleHistoryWindow?.ApplyListeningState(e.State, displayMessage, session.IsListening);
             SubtitleReplayStatusText.Text = displayMessage;
             PushSubtitleControlState(displayMessage);
         });
@@ -4236,6 +4258,8 @@ public partial class MainWindow : Window
             AppLocalization.Text("Subtitle.Listening.Waiting"),
         SubtitleListeningState.Starting =>
             AppLocalization.Text("Subtitle.Listening.Starting"),
+        SubtitleListeningState.Stopping =>
+            AppLocalization.Text("Subtitle.Listening.Stopping"),
         SubtitleListeningState.Listening =>
             AppLocalization.Text("Subtitle.Listening.Active"),
         SubtitleListeningState.Error =>

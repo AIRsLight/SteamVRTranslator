@@ -7,14 +7,25 @@ using SteamVRTranslator.App.Localization;
 
 namespace SteamVRTranslator.App.Speech;
 
-public sealed class SenseVoiceCommandTranscriber : IDisposable
+public sealed class SenseVoiceCommandTranscriber : ISubtitleLocalTranscriber
 {
-    private readonly AppLog _log;
-    private readonly SenseVoiceResidentWorker _worker;
+    private readonly SenseVoiceModelPool.Lease _lease;
+    private readonly SenseVoiceRequestPriority _priority;
 
-    public SenseVoiceCommandTranscriber(SpeechConfiguration configuration, AppLog log)
+    public SenseVoiceCommandTranscriber(SpeechConfiguration configuration, AppLog log, CancellationToken cancellationToken = default)
+        : this(configuration, log, cancellationToken, SenseVoiceRequestPriority.Interactive) { }
+
+    internal SenseVoiceCommandTranscriber(SpeechConfiguration configuration, AppLog log, CancellationToken cancellationToken,
+        SenseVoiceRequestPriority priority, SenseVoiceModelPool? pool = null)
     {
-        _log = log;
+        _priority = priority;
+        _lease = (pool ?? SenseVoiceModelPool.Shared).AcquireAsync(configuration, log, cancellationToken)
+            .GetAwaiter().GetResult();
+    }
+
+    internal static ISenseVoiceWorker CreateWorker(SpeechConfiguration configuration, AppLog log, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
         var useVulkan = string.Equals(
             configuration.SenseVoiceBackend,
             "vulkan",
@@ -33,7 +44,7 @@ public sealed class SenseVoiceCommandTranscriber : IDisposable
                 ? configuration.SenseVoiceVulkanExecutablePath
                 : configuration.SenseVoiceExecutablePath,
             useVulkan ? "SenseVoice Vulkan 运行时" : "SenseVoice CPU 运行时");
-        EnsureLanguageSelectionSupported(executablePath);
+        EnsureLanguageSelectionSupported(executablePath, cancellationToken);
         var modelPath = ResolveRequiredPath(configuration.SenseVoiceModelPath, "SenseVoice 模型");
         string? vadPath = null;
         if (!string.IsNullOrWhiteSpace(configuration.SenseVoiceVadModelPath))
@@ -49,54 +60,25 @@ public sealed class SenseVoiceCommandTranscriber : IDisposable
             : SenseVoiceNativePath.Resolve(vadPath, workingDirectory);
         var arguments = BuildArguments(configuration, modelArgument, vadArgument);
 
-        _log.Info(
+        log.Info(
             $"[asr] 正在启动 SenseVoice 常驻进程：运行时={executablePath}，" +
             $"引擎={(useVulkan ? "Vulkan" : "CPU")}，" +
             $"GPU={configuration.SenseVoiceVulkanDeviceIndex?.ToString() ?? "None"}/" +
             $"{configuration.SenseVoiceVulkanDeviceName ?? "None"}，" +
             $"语言={configuration.EffectiveRecognitionLanguage}，" +
             $"模型={modelPath}，VAD={vadPath}");
-        _worker = new SenseVoiceResidentWorker(executablePath, arguments, workingDirectory);
-        _log.Info($"[asr] SenseVoice 常驻进程已就绪：PID={_worker.ProcessId}。");
+        var worker = new SenseVoiceResidentWorker(executablePath, arguments, workingDirectory, cancellationToken);
+        log.Info($"[asr] SenseVoice 常驻进程已就绪：PID={worker.ProcessId}。");
+        return worker;
     }
 
-    public async Task<CommandTranscriptionResult> TranscribeAsync(
+    public Task<CommandTranscriptionResult> TranscribeAsync(
         CommandAudioInput audio,
         string diagnosticTag,
-        CancellationToken cancellationToken)
-    {
-        var stopwatch = Stopwatch.StartNew();
-        var size = new FileInfo(audio.FilePath).Length;
-        _log.Info(
-            $"{diagnosticTag} [asr] 请求开始：PID={_worker.ProcessId}，" +
-            $"音频={audio.Duration.TotalMilliseconds:F0} ms/{size:N0} bytes，" +
-            $"文件={Path.GetFileName(audio.FilePath)}");
-        try
-        {
-            var text = await _worker.TranscribeAsync(audio.FilePath, cancellationToken);
-            stopwatch.Stop();
-            var workerDiagnostics = _worker.TakeDiagnostics();
-            if (!string.IsNullOrWhiteSpace(workerDiagnostics))
-            {
-                _log.Info($"{diagnosticTag} [asr] worker诊断：{SingleLine(workerDiagnostics)}");
-            }
+        CancellationToken cancellationToken) => _lease.TranscribeAsync(audio, diagnosticTag, _priority, cancellationToken);
 
-            _log.Info(
-                $"{diagnosticTag} [asr] 请求完成：耗时={stopwatch.Elapsed.TotalMilliseconds:F0} ms，" +
-                $"字符={text.Length}，文本={Preview(text)}");
-            return new CommandTranscriptionResult(text, stopwatch.Elapsed);
-        }
-        catch (Exception exception)
-        {
-            stopwatch.Stop();
-            _log.Error(
-                $"{diagnosticTag} [asr] 请求失败：耗时={stopwatch.Elapsed.TotalMilliseconds:F0} ms。",
-                exception);
-            throw;
-        }
-    }
-
-    public void Dispose() => _worker.Dispose();
+    public void Dispose() => _lease.Dispose();
+    public ValueTask DisposeAsync() => _lease.DisposeAsync();
 
     internal static IReadOnlyList<string> BuildArguments(
         SpeechConfiguration configuration,
@@ -136,7 +118,7 @@ public sealed class SenseVoiceCommandTranscriber : IDisposable
     internal static bool HelpTextSupportsLanguageSelection(string? helpText) =>
         helpText?.Contains("--language", StringComparison.Ordinal) == true;
 
-    private static void EnsureLanguageSelectionSupported(string executablePath)
+    private static void EnsureLanguageSelectionSupported(string executablePath, CancellationToken cancellationToken)
     {
         var startInfo = new ProcessStartInfo(executablePath)
         {
@@ -151,11 +133,14 @@ public sealed class SenseVoiceCommandTranscriber : IDisposable
                 AppLocalization.Text("Validation.AsrLanguageRuntime"));
         var standardOutput = process.StandardOutput.ReadToEndAsync();
         var standardError = process.StandardError.ReadToEndAsync();
-        if (!process.WaitForExit(5000))
+        try
         {
-            process.Kill(entireProcessTree: true);
-            throw new InvalidOperationException(
-                AppLocalization.Text("Validation.AsrLanguageRuntime"));
+            process.WaitForExitAsync(cancellationToken).WaitAsync(TimeSpan.FromSeconds(5), cancellationToken).GetAwaiter().GetResult();
+        }
+        catch
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            throw;
         }
 
         var helpText = standardOutput.GetAwaiter().GetResult() +
@@ -166,12 +151,6 @@ public sealed class SenseVoiceCommandTranscriber : IDisposable
                 AppLocalization.Text("Validation.AsrLanguageRuntime"));
         }
     }
-
-    private static string Preview(string text) =>
-        text.Length <= 120 ? text : text[..120] + "...";
-
-    private static string SingleLine(string text) =>
-        string.Join(" | ", text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries));
 
     private static string ResolveRequiredPath(string configuredPath, string description)
     {
@@ -195,7 +174,13 @@ public sealed class SenseVoiceCommandTranscriber : IDisposable
 
 public sealed record CommandTranscriptionResult(string Text, TimeSpan Duration);
 
-internal sealed class SenseVoiceResidentWorker : IDisposable
+internal interface ISubtitleLocalTranscriber : IDisposable, IAsyncDisposable
+{
+    Task<CommandTranscriptionResult> TranscribeAsync(CommandAudioInput audio, string diagnosticTag, CancellationToken cancellationToken);
+    ValueTask IAsyncDisposable.DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
+}
+
+internal sealed class SenseVoiceResidentWorker : ISenseVoiceWorker
 {
     private static readonly TimeSpan StartupTimeout = TimeSpan.FromMinutes(2);
     private readonly string _workingDirectory;
@@ -211,7 +196,8 @@ internal sealed class SenseVoiceResidentWorker : IDisposable
     public SenseVoiceResidentWorker(
         string executablePath,
         IEnumerable<string> arguments,
-        string? workingDirectory = null)
+        string? workingDirectory = null,
+        CancellationToken cancellationToken = default)
     {
         _workingDirectory = Path.GetFullPath(workingDirectory ?? AppContext.BaseDirectory);
         var startInfo = new ProcessStartInfo(executablePath)
@@ -238,7 +224,7 @@ internal sealed class SenseVoiceResidentWorker : IDisposable
         try
         {
             var ready = _process.StandardOutput.ReadLineAsync()
-                .WaitAsync(StartupTimeout)
+                .WaitAsync(StartupTimeout, cancellationToken)
                 .GetAwaiter()
                 .GetResult();
             if (!string.Equals(ready, "READY", StringComparison.Ordinal))
@@ -354,7 +340,7 @@ internal sealed class SenseVoiceResidentWorker : IDisposable
     {
         try
         {
-            while (await _process.StandardError.ReadLineAsync() is { } line)
+            while (await _process.StandardError.ReadLineAsync().ConfigureAwait(false) is { } line)
             {
                 lock (_stderrSync)
                 {

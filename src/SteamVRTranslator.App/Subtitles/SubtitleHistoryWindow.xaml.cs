@@ -18,6 +18,8 @@ public partial class SubtitleHistoryWindow : Window,
     private readonly SubtitleHistoryViewModel _viewModel;
     private ButtonBase? _hoveredButton;
     private bool _allowClose;
+    private bool _listeningBusy;
+    private SubtitleListeningState _listeningState;
 
     public SubtitleHistoryWindow(SubtitleHistoryViewModel viewModel)
     {
@@ -119,9 +121,17 @@ public partial class SubtitleHistoryWindow : Window,
         return closest;
     }
 
-    public void ApplyListeningState(SubtitleListeningState state, string? message = null)
+    public void SetListeningBusy(bool busy)
     {
-        var active = state != SubtitleListeningState.Stopped;
+        _listeningBusy = busy;
+        ListenButton.IsEnabled = !busy && _listeningState != SubtitleListeningState.Stopping;
+    }
+
+    public void ApplyListeningState(SubtitleListeningState state, string? message = null, bool? isListening = null)
+    {
+        _listeningState = state;
+        var active = isListening ?? state != SubtitleListeningState.Stopped;
+        ListenButton.IsEnabled = !_listeningBusy && state != SubtitleListeningState.Stopping;
         ListenButtonIcon.Data = active ? MaterialIconPaths.Stop : MaterialIconPaths.Play;
         ListenButtonText.Text = AppLocalization.Text(
             active ? "Subtitle.Window.StopListening" : "Subtitle.Window.StartListening");

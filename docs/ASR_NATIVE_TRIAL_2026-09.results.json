@@ -1,0 +1,1518 @@
+{
+  "date": "2026-09-14",
+  "hardware": {
+    "cpu": "Intel Core i7-14700KF",
+    "physical_cores": 20,
+    "logical_processors": 28,
+    "ram_bytes": 68547031040,
+    "gpu": "NVIDIA GeForce RTX 3060 12 GB",
+    "gpu_driver": "596.49",
+    "os": "Windows 11 x64",
+    "python": "3.13.5"
+  },
+  "runtime_versions": {
+    "nemo": "v0.1.0",
+    "moonshine": "v0.1.5"
+  },
+  "scope": "Public sample smoke tests, synthetic repeated speech and silence; not a WER/CER benchmark. Realtime elapsed time includes input pacing. GPU counters are snapshots after inference, not peaks.",
+  "cases": [
+    {
+      "engine": "moonshine",
+      "backend": "cpu",
+      "language": "en",
+      "mode": "offline",
+      "load_ms": 192.9691000841558,
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "disable_batching": false,
+      "skip_warmup": false,
+      "endpointing": false,
+      "id": "moonshine-cpu-en-offline-arch2",
+      "audio_filename": "en.wav",
+      "runs": [
+        {
+          "text": "The tribal chief then called for the boy. And presented him with fifty pieces of gold.",
+          "elapsed_ms": 800.0655001960695,
+          "native_call_ms": 789.3282999284565,
+          "rtf": 0.1118659815710388,
+          "duration_sec": 7.152,
+          "first_text_ms": null,
+          "tail_ms": null,
+          "iteration": 0,
+          "rss_before_bytes": 120930304,
+          "rss_after_bytes": 140877824,
+          "peak_rss_bytes": 185696256,
+          "final_segments": [
+            "The tribal chief then called for the boy.",
+            "And presented him with fifty pieces of gold."
+          ]
+        },
+        {
+          "text": "The tribal chief then called for the boy. And presented him with fifty pieces of gold.",
+          "elapsed_ms": 1121.10840016976,
+          "native_call_ms": 1112.3160002753139,
+          "rtf": 0.1567545302250783,
+          "duration_sec": 7.152,
+          "first_text_ms": null,
+          "tail_ms": null,
+          "iteration": 1,
+          "rss_before_bytes": 140906496,
+          "rss_after_bytes": 142229504,
+          "peak_rss_bytes": 187232256,
+          "final_segments": [
+            "The tribal chief then called for the boy.",
+            "And presented him with fifty pieces of gold."
+          ]
+        },
+        {
+          "text": "The tribal chief then called for the boy. And presented him with fifty pieces of gold.",
+          "elapsed_ms": 831.3675001263618,
+          "native_call_ms": 821.8955998308957,
+          "rtf": 0.1162426594136412,
+          "duration_sec": 7.152,
+          "first_text_ms": null,
+          "tail_ms": null,
+          "iteration": 2,
+          "rss_before_bytes": 142229504,
+          "rss_after_bytes": 141352960,
+          "peak_rss_bytes": 187670528,
+          "final_segments": [
+            "The tribal chief then called for the boy.",
+            "And presented him with fifty pieces of gold."
+          ]
+        }
+      ],
+      "architecture": 2
+    },
+    {
+      "engine": "moonshine",
+      "backend": "cpu",
+      "language": "en",
+      "mode": "offline",
+      "load_ms": 415.7553999684751,
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "id": "moonshine-cpu-en-offline",
+      "audio_filename": "en.wav",
+      "runs": [
+        {
+          "text": "The tribal thief then called for the boy. And presented him with fifty pieces of gold,",
+          "elapsed_ms": 2777.2265998646617,
+          "native_call_ms": 2768.3594999834895,
+          "rtf": 0.38831468118913054,
+          "duration_sec": 7.152,
+          "first_text_ms": null,
+          "tail_ms": null,
+          "iteration": 0,
+          "rss_before_bytes": 237502464,
+          "rss_after_bytes": 267059200,
+          "peak_rss_bytes": 337350656,
+          "final_segments": [
+            "The tribal thief then called for the boy.",
+            "And presented him with fifty pieces of gold,"
+          ]
+        },
+        {
+          "text": "The tribal thief then called for the boy. And presented him with fifty pieces of gold,",
+          "elapsed_ms": 2822.52709986642,
+          "native_call_ms": 2811.932200100273,
+          "rtf": 0.3946486437173406,
+          "duration_sec": 7.152,
+          "first_text_ms": null,
+          "tail_ms": null,
+          "iteration": 1,
+          "rss_before_bytes": 267087872,
+          "rss_after_bytes": 267190272,
+          "peak_rss_bytes": 342224896,
+          "final_segments": [
+            "The tribal thief then called for the boy.",
+            "And presented him with fifty pieces of gold,"
+          ]
+        },
+        {
+          "text": "The tribal thief then called for the boy. And presented him with fifty pieces of gold,",
+          "elapsed_ms": 3181.254900060594,
+          "native_call_ms": 3172.1763000823557,
+          "rtf": 0.44480633390108976,
+          "duration_sec": 7.152,
+          "first_text_ms": null,
+          "tail_ms": null,
+          "iteration": 2,
+          "rss_before_bytes": 267190272,
+          "rss_after_bytes": 267542528,
+          "peak_rss_bytes": 343019520,
+          "final_segments": [
+            "The tribal thief then called for the boy.",
+            "And presented him with fifty pieces of gold,"
+          ]
+        }
+      ],
+      "architecture": 4
+    },
+    {
+      "engine": "moonshine",
+      "backend": "cpu",
+      "language": "en",
+      "mode": "realtime",
+      "load_ms": 194.74649988114834,
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "disable_batching": false,
+      "skip_warmup": false,
+      "endpointing": false,
+      "id": "moonshine-cpu-en-realtime-arch2",
+      "audio_filename": "en.wav",
+      "runs": [
+        {
+          "text": "The tribal chief then called for the boy. And presented him with shifty pieces of gold.",
+          "elapsed_ms": 8221.54080029577,
+          "native_call_ms": 3814.0976983122528,
+          "rtf": 1.1495442953433683,
+          "duration_sec": 7.152,
+          "first_text_ms": 2006.2000001780689,
+          "tail_ms": 1069.5408002957702,
+          "iteration": 0,
+          "rss_before_bytes": 121237504,
+          "rss_after_bytes": 143056896,
+          "peak_rss_bytes": 190767104,
+          "final_segments": [
+            "The tribal chief then called for the boy.",
+            "And presented him with shifty pieces of gold."
+          ]
+        }
+      ],
+      "architecture": 2
+    },
+    {
+      "engine": "moonshine",
+      "backend": "cpu",
+      "language": "en",
+      "mode": "realtime",
+      "load_ms": 444.86539997160435,
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "id": "moonshine-cpu-en-realtime",
+      "audio_filename": "en.wav",
+      "runs": [
+        {
+          "text": "The tribal thief then called for the boy. And presented him with fifty pieces of gold.",
+          "elapsed_ms": 9077.019599732012,
+          "native_call_ms": 5907.900400459766,
+          "rtf": 1.2691582214390396,
+          "duration_sec": 7.152,
+          "first_text_ms": 2308.6754996329546,
+          "tail_ms": 1925.0195997320116,
+          "iteration": 0,
+          "rss_before_bytes": 237539328,
+          "rss_after_bytes": 265592832,
+          "peak_rss_bytes": 336240640,
+          "final_segments": [
+            "The tribal thief then called for the boy.",
+            "And presented him with fifty pieces of gold."
+          ]
+        }
+      ],
+      "architecture": 4
+    },
+    {
+      "engine": "moonshine",
+      "backend": "cpu",
+      "language": "en",
+      "mode": "stream",
+      "load_ms": 190.71940006688237,
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "disable_batching": false,
+      "skip_warmup": false,
+      "endpointing": false,
+      "id": "moonshine-cpu-en-stream-arch2-long-english",
+      "audio_filename": "en-long.wav",
+      "runs": [
+        {
+          "text": "It was the best of times. it was the worst of times. It was the age of wisdom, It was the age of foolishness, It was the epoch of belief, It was the epoch of incredulity. It was the season of light, It was the season of darkness. It was the spring of hope. It was the winter of despair. We had everything before us. We had nothing before us. We were all going direct to heaven, We were all going to act the other way. In short,, the period was so far like the present period, That some of its noisiest authorities insisted on its being received for good or for evil in the superlative degree of comparison only.",
+          "elapsed_ms": 20597.89129998535,
+          "native_call_ms": 20436.541898641735,
+          "rtf": 0.4641869850951506,
+          "duration_sec": 44.374125,
+          "first_text_ms": 156.84759989380836,
+          "tail_ms": null,
+          "iteration": 0,
+          "rss_before_bytes": 122003456,
+          "rss_after_bytes": 151330816,
+          "peak_rss_bytes": 206381056,
+          "final_segments": [
+            "It was the best of times. it was the worst of times.",
+            "It was the age of wisdom,",
+            "It was the age of foolishness,",
+            "It was the epoch of belief,",
+            "It was the epoch of incredulity.",
+            "It was the season of light,",
+            "It was the season of darkness.",
+            "It was the spring of hope. It was the winter of despair.",
+            "We had everything before us. We had nothing before us.",
+            "We were all going direct to heaven,",
+            "We were all going to act the other way.",
+            "In short,, the period was so far like the present period,",
+            "That some of its noisiest authorities insisted on its being received for good or for evil in the superlative degree of comparison only."
+          ]
+        }
+      ],
+      "architecture": 2
+    },
+    {
+      "engine": "moonshine",
+      "backend": "cpu",
+      "language": "ja",
+      "mode": "offline",
+      "load_ms": 467.4248001538217,
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "id": "moonshine-cpu-ja-offline",
+      "audio_filename": "ja.wav",
+      "runs": [
+        {
+          "text": "うちの中学は弁当制で持っていけない場合は50円の学校販売のパンを買う",
+          "elapsed_ms": 2139.8722999729216,
+          "native_call_ms": 2128.0642999336123,
+          "rtf": 0.29720448610735023,
+          "duration_sec": 7.2,
+          "first_text_ms": null,
+          "tail_ms": null,
+          "iteration": 0,
+          "rss_before_bytes": 216801280,
+          "rss_after_bytes": 252420096,
+          "peak_rss_bytes": 285405184,
+          "final_segments": [
+            "うちの中学は弁当制で持っていけない場合は50円の学校販売のパンを買う"
+          ]
+        },
+        {
+          "text": "うちの中学は弁当制で持っていけない場合は50円の学校販売のパンを買う",
+          "elapsed_ms": 1271.9291001558304,
+          "native_call_ms": 1260.4856002144516,
+          "rtf": 0.17665681946608755,
+          "duration_sec": 7.2,
+          "first_text_ms": null,
+          "tail_ms": null,
+          "iteration": 1,
+          "rss_before_bytes": 252461056,
+          "rss_after_bytes": 253493248,
+          "peak_rss_bytes": 285405184,
+          "final_segments": [
+            "うちの中学は弁当制で持っていけない場合は50円の学校販売のパンを買う"
+          ]
+        },
+        {
+          "text": "うちの中学は弁当制で持っていけない場合は50円の学校販売のパンを買う",
+          "elapsed_ms": 1591.2056001834571,
+          "native_call_ms": 1582.746199797839,
+          "rtf": 0.22100077780325794,
+          "duration_sec": 7.2,
+          "first_text_ms": null,
+          "tail_ms": null,
+          "iteration": 2,
+          "rss_before_bytes": 253493248,
+          "rss_after_bytes": 253382656,
+          "peak_rss_bytes": 285405184,
+          "final_segments": [
+            "うちの中学は弁当制で持っていけない場合は50円の学校販売のパンを買う"
+          ]
+        }
+      ],
+      "architecture": 4
+    },
+    {
+      "engine": "moonshine",
+      "backend": "cpu",
+      "language": "ja",
+      "mode": "realtime",
+      "load_ms": 490.09699979797006,
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "id": "moonshine-cpu-ja-realtime",
+      "audio_filename": "ja.wav",
+      "runs": [
+        {
+          "text": "うちの中学は弁当制で持っていけない場合は50円の学校販売のパンを買う",
+          "elapsed_ms": 7744.888899847865,
+          "native_call_ms": 4166.923000011593,
+          "rtf": 1.075679013867759,
+          "duration_sec": 7.2,
+          "first_text_ms": 1476.5163999982178,
+          "tail_ms": 544.8888998478651,
+          "iteration": 0,
+          "rss_before_bytes": 216915968,
+          "rss_after_bytes": 251604992,
+          "peak_rss_bytes": 284020736,
+          "final_segments": [
+            "うちの中学は弁当制で持っていけない場合は50円の学校販売のパンを買う"
+          ]
+        }
+      ],
+      "architecture": 4
+    },
+    {
+      "engine": "moonshine",
+      "backend": "cpu",
+      "language": "zh",
+      "mode": "offline",
+      "load_ms": 215.4655996710062,
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "disable_batching": false,
+      "skip_warmup": false,
+      "endpointing": false,
+      "id": "moonshine-cpu-zh-offline-second-clip",
+      "audio_filename": "zh-long.wav",
+      "runs": [
+        {
+          "text": "甚至出现交易几乎停滞的情况",
+          "elapsed_ms": 298.64059993997216,
+          "native_call_ms": 278.14859990030527,
+          "rtf": 0.07103830633542296,
+          "duration_sec": 4.2039375,
+          "first_text_ms": null,
+          "tail_ms": null,
+          "iteration": 0,
+          "rss_before_bytes": 106758144,
+          "rss_after_bytes": 125374464,
+          "peak_rss_bytes": 130121728,
+          "final_segments": [
+            "甚至出现交易几乎停滞的情况"
+          ]
+        },
+        {
+          "text": "甚至出现交易几乎停滞的情况",
+          "elapsed_ms": 224.29509973153472,
+          "native_call_ms": 219.1443000920117,
+          "rtf": 0.053353576196490726,
+          "duration_sec": 4.2039375,
+          "first_text_ms": null,
+          "tail_ms": null,
+          "iteration": 1,
+          "rss_before_bytes": 125403136,
+          "rss_after_bytes": 125964288,
+          "peak_rss_bytes": 132685824,
+          "final_segments": [
+            "甚至出现交易几乎停滞的情况"
+          ]
+        },
+        {
+          "text": "甚至出现交易几乎停滞的情况",
+          "elapsed_ms": 243.46829997375607,
+          "native_call_ms": 227.78269974514842,
+          "rtf": 0.05791434814950414,
+          "duration_sec": 4.2039375,
+          "first_text_ms": null,
+          "tail_ms": null,
+          "iteration": 2,
+          "rss_before_bytes": 125968384,
+          "rss_after_bytes": 126013440,
+          "peak_rss_bytes": 132685824,
+          "final_segments": [
+            "甚至出现交易几乎停滞的情况"
+          ]
+        }
+      ],
+      "architecture": 2
+    },
+    {
+      "engine": "moonshine",
+      "backend": "cpu",
+      "language": "zh",
+      "mode": "offline",
+      "load_ms": 182.73920007050037,
+      "architecture": 2,
+      "submitted_pcm_sha256": "4044b0963786a001e8196cbcf3c38612e92655d07c718b0506f5f1a50b5b2cc5",
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "disable_batching": false,
+      "skip_warmup": false,
+      "endpointing": false,
+      "endpoint_ms": null,
+      "id": "moonshine-cpu-zh-offline-tools-verified",
+      "audio_filename": "zh.wav",
+      "runs": [
+        {
+          "text": "开放时间早上九点至下午五点",
+          "elapsed_ms": 584.0325998142362,
+          "native_call_ms": 558.3566999994218,
+          "rtf": 0.10444073673359015,
+          "duration_sec": 5.592,
+          "first_text_ms": null,
+          "tail_ms": null,
+          "iteration": 0,
+          "rss_before_bytes": 106811392,
+          "rss_after_bytes": 127197184,
+          "peak_rss_bytes": 130449408,
+          "final_segments": [
+            "开放时间早上九点至下午五点"
+          ]
+        }
+      ]
+    },
+    {
+      "engine": "moonshine",
+      "backend": "cpu",
+      "language": "zh",
+      "mode": "offline",
+      "load_ms": 180.058800149709,
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "id": "moonshine-cpu-zh-offline",
+      "audio_filename": "zh.wav",
+      "runs": [
+        {
+          "text": "开放时间早上九点至下午五点",
+          "elapsed_ms": 305.0462999381125,
+          "native_call_ms": 269.1621999256313,
+          "rtf": 0.05455048282155087,
+          "duration_sec": 5.592,
+          "first_text_ms": null,
+          "tail_ms": null,
+          "iteration": 0,
+          "rss_before_bytes": 107290624,
+          "rss_after_bytes": 126889984,
+          "peak_rss_bytes": 129916928,
+          "final_segments": [
+            "开放时间早上九点至下午五点"
+          ]
+        },
+        {
+          "text": "开放时间早上九点四下午五点",
+          "elapsed_ms": 198.0817001312971,
+          "native_call_ms": 189.6959003061056,
+          "rtf": 0.03542233550273553,
+          "duration_sec": 5.592,
+          "first_text_ms": null,
+          "tail_ms": null,
+          "iteration": 1,
+          "rss_before_bytes": 126926848,
+          "rss_after_bytes": 128040960,
+          "peak_rss_bytes": 134057984,
+          "final_segments": [
+            "开放时间早上九点四下午五点"
+          ]
+        },
+        {
+          "text": "开放时间早上九点四下午五点",
+          "elapsed_ms": 237.59300028905272,
+          "native_call_ms": 230.36070028319955,
+          "rtf": 0.04248801864968754,
+          "duration_sec": 5.592,
+          "first_text_ms": null,
+          "tail_ms": null,
+          "iteration": 2,
+          "rss_before_bytes": 128040960,
+          "rss_after_bytes": 128118784,
+          "peak_rss_bytes": 134131712,
+          "final_segments": [
+            "开放时间早上九点四下午五点"
+          ]
+        }
+      ],
+      "architecture": 2
+    },
+    {
+      "engine": "moonshine",
+      "backend": "cpu",
+      "language": "zh",
+      "mode": "realtime",
+      "load_ms": 197.94380012899637,
+      "repeat_audio": 5,
+      "silence_sec": 0,
+      "disable_batching": false,
+      "skip_warmup": false,
+      "endpointing": false,
+      "id": "moonshine-cpu-zh-realtime-repeat5-continuous",
+      "audio_filename": "zh.wav",
+      "runs": [
+        {
+          "text": "开放时间早上九点至下午五点 开放时间早上九点四日下午五点 开放时间早上九点四日下午五点 开放时间早上九点四日下午五点 开放时间早上九点四日下午五点",
+          "elapsed_ms": 33020.98019979894,
+          "native_call_ms": 5756.69149775058,
+          "rtf": 1.0018501274210845,
+          "duration_sec": 32.96,
+          "first_text_ms": 1997.7521002292633,
+          "tail_ms": 60.98019979894161,
+          "iteration": 0,
+          "rss_before_bytes": 107597824,
+          "rss_after_bytes": 128331776,
+          "peak_rss_bytes": 139997184,
+          "final_segments": [
+            "开放时间早上九点至下午五点",
+            "开放时间早上九点四日下午五点",
+            "开放时间早上九点四日下午五点",
+            "开放时间早上九点四日下午五点",
+            "开放时间早上九点四日下午五点"
+          ]
+        }
+      ],
+      "architecture": 2
+    },
+    {
+      "engine": "moonshine",
+      "backend": "cpu",
+      "language": "zh",
+      "mode": "realtime",
+      "load_ms": 196.35429978370667,
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "id": "moonshine-cpu-zh-realtime",
+      "audio_filename": "zh.wav",
+      "runs": [
+        {
+          "text": "开放时间早上九点至下午五点",
+          "elapsed_ms": 5646.15279994905,
+          "native_call_ms": 544.5640999823809,
+          "rtf": 1.0096839771010462,
+          "duration_sec": 5.592,
+          "first_text_ms": 1877.4652001447976,
+          "tail_ms": 54.15279994904995,
+          "iteration": 0,
+          "rss_before_bytes": 107917312,
+          "rss_after_bytes": 127221760,
+          "peak_rss_bytes": 135258112,
+          "final_segments": [
+            "开放时间早上九点至下午五点"
+          ]
+        }
+      ],
+      "architecture": 2
+    },
+    {
+      "engine": "moonshine",
+      "backend": "cpu",
+      "language": "zh",
+      "mode": "stream",
+      "load_ms": 218.696900177747,
+      "repeat_audio": 1,
+      "silence_sec": 8,
+      "disable_batching": false,
+      "skip_warmup": false,
+      "endpointing": false,
+      "id": "moonshine-cpu-zh-stream-silence8-silence",
+      "audio_filename": "zh.wav",
+      "runs": [
+        {
+          "text": "",
+          "elapsed_ms": 136.95740001276135,
+          "native_call_ms": 83.71009863913059,
+          "rtf": 0.01711967500159517,
+          "duration_sec": 8.0,
+          "first_text_ms": null,
+          "tail_ms": null,
+          "iteration": 0,
+          "rss_before_bytes": 107347968,
+          "rss_after_bytes": 117440512,
+          "peak_rss_bytes": 130002944,
+          "final_segments": []
+        }
+      ],
+      "architecture": 2
+    },
+    {
+      "engine": "nemo",
+      "backend": "cpu",
+      "language": "en",
+      "mode": "offline",
+      "load_ms": 2235.34099990502,
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "id": "nemo-cpu-en-offline",
+      "audio_filename": "en.wav",
+      "runs": [
+        {
+          "text": "The tribal chieftain called for the boy and presented him with fifty pieces of gold.",
+          "duration_sec": 7.152,
+          "elapsed_ms": 867.7785000763834,
+          "rtf": 0.12133368289658604,
+          "iteration": 0,
+          "rss_before_bytes": 980992000,
+          "rss_after_bytes": 1784569856,
+          "peak_rss_bytes": 1785712640
+        },
+        {
+          "text": "The tribal chieftain called for the boy and presented him with fifty pieces of gold.",
+          "duration_sec": 7.152,
+          "elapsed_ms": 670.5553000792861,
+          "rtf": 0.09375773211399414,
+          "iteration": 1,
+          "rss_before_bytes": 1784569856,
+          "rss_after_bytes": 1784049664,
+          "peak_rss_bytes": 1787518976
+        },
+        {
+          "text": "The tribal chieftain called for the boy and presented him with fifty pieces of gold.",
+          "duration_sec": 7.152,
+          "elapsed_ms": 659.5287001691759,
+          "rtf": 0.0922159815672785,
+          "iteration": 2,
+          "rss_before_bytes": 1784049664,
+          "rss_after_bytes": 1784524800,
+          "peak_rss_bytes": 1787518976
+        }
+      ]
+    },
+    {
+      "engine": "nemo",
+      "backend": "cpu",
+      "language": "en",
+      "mode": "realtime",
+      "load_ms": 2250.5115000531077,
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "id": "nemo-cpu-en-realtime",
+      "audio_filename": "en.wav",
+      "runs": [
+        {
+          "text": "The tribal chieftain called for the boy and presented him with fifty pieces of gold.",
+          "duration_sec": 7.152,
+          "elapsed_ms": 7370.744899846613,
+          "rtf": 1.0305851370031618,
+          "first_text_ms": 1636.835299897939,
+          "tail_ms": 218.7448998466134,
+          "iteration": 0,
+          "rss_before_bytes": 980996096,
+          "rss_after_bytes": 981938176,
+          "peak_rss_bytes": 990740480,
+          "final_segments": [
+            "The tribal chieftain called for the boy and presented him with fifty pieces of gold."
+          ]
+        }
+      ]
+    },
+    {
+      "engine": "nemo",
+      "backend": "cpu",
+      "language": "ja",
+      "mode": "offline",
+      "load_ms": 2233.8045998476446,
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "id": "nemo-cpu-ja-offline",
+      "audio_filename": "ja.wav",
+      "runs": [
+        {
+          "text": "うちの中学は弁当性で持っていけない場合は五十円の学校販売のパンを買う",
+          "duration_sec": 7.2,
+          "elapsed_ms": 875.0329003669322,
+          "rtf": 0.12153234727318502,
+          "iteration": 0,
+          "rss_before_bytes": 981090304,
+          "rss_after_bytes": 1787248640,
+          "peak_rss_bytes": 1788395520
+        },
+        {
+          "text": "うちの中学は弁当性で持っていけない場合は五十円の学校販売のパンを買う",
+          "duration_sec": 7.2,
+          "elapsed_ms": 643.1380999274552,
+          "rtf": 0.08932473610103545,
+          "iteration": 1,
+          "rss_before_bytes": 1787248640,
+          "rss_after_bytes": 1786789888,
+          "peak_rss_bytes": 1790259200
+        },
+        {
+          "text": "うちの中学は弁当性で持っていけない場合は五十円の学校販売のパンを買う",
+          "duration_sec": 7.2,
+          "elapsed_ms": 641.7367998510599,
+          "rtf": 0.08913011109042498,
+          "iteration": 2,
+          "rss_before_bytes": 1786789888,
+          "rss_after_bytes": 1787166720,
+          "peak_rss_bytes": 1790259200
+        }
+      ]
+    },
+    {
+      "engine": "nemo",
+      "backend": "cpu",
+      "language": "ja",
+      "mode": "realtime",
+      "load_ms": 2255.613499786705,
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "id": "nemo-cpu-ja-realtime",
+      "audio_filename": "ja.wav",
+      "runs": [
+        {
+          "text": "うちの中学は弁当性で持っていけない場合は五十円の学校販売のパンを買う",
+          "duration_sec": 7.2,
+          "elapsed_ms": 7414.668600074947,
+          "rtf": 1.0298150833437427,
+          "first_text_ms": 1073.3377002179623,
+          "tail_ms": 214.66860007494688,
+          "iteration": 0,
+          "rss_before_bytes": 981061632,
+          "rss_after_bytes": 981893120,
+          "peak_rss_bytes": 990842880,
+          "final_segments": [
+            "うちの中学は弁当性で持っていけない場合は五十円の学校販売のパンを買う"
+          ]
+        }
+      ]
+    },
+    {
+      "engine": "nemo",
+      "backend": "cpu",
+      "language": "zh",
+      "mode": "offline",
+      "load_ms": 2237.7341999672353,
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "id": "nemo-cpu-zh-offline",
+      "audio_filename": "zh.wav",
+      "runs": [
+        {
+          "text": "开放时间早上九点至下午五点。",
+          "duration_sec": 5.592,
+          "elapsed_ms": 663.6840999126434,
+          "rtf": 0.11868456722329103,
+          "iteration": 0,
+          "rss_before_bytes": 981221376,
+          "rss_after_bytes": 1762566144,
+          "peak_rss_bytes": 1764134912
+        },
+        {
+          "text": "开放时间早上九点至下午五点。",
+          "duration_sec": 5.592,
+          "elapsed_ms": 460.99000005051494,
+          "rtf": 0.08243741059558565,
+          "iteration": 1,
+          "rss_before_bytes": 1762566144,
+          "rss_after_bytes": 1762881536,
+          "peak_rss_bytes": 1765396480
+        },
+        {
+          "text": "开放时间早上九点至下午五点。",
+          "duration_sec": 5.592,
+          "elapsed_ms": 450.76859975233674,
+          "rtf": 0.08060954931193433,
+          "iteration": 2,
+          "rss_before_bytes": 1762881536,
+          "rss_after_bytes": 1763602432,
+          "peak_rss_bytes": 1765515264
+        }
+      ]
+    },
+    {
+      "engine": "nemo",
+      "backend": "cpu",
+      "language": "zh",
+      "mode": "realtime",
+      "load_ms": 2244.5177999325097,
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "id": "nemo-cpu-zh-realtime",
+      "audio_filename": "zh.wav",
+      "runs": [
+        {
+          "text": "开放时间早上九点至下午五点",
+          "duration_sec": 5.592,
+          "elapsed_ms": 5807.020000182092,
+          "rtf": 1.0384513591169693,
+          "first_text_ms": 1639.667300041765,
+          "tail_ms": 215.0200001820922,
+          "iteration": 0,
+          "rss_before_bytes": 980971520,
+          "rss_after_bytes": 981766144,
+          "peak_rss_bytes": 990769152,
+          "final_segments": [
+            "开放时间早上九点至下午五点"
+          ]
+        }
+      ]
+    },
+    {
+      "engine": "nemo",
+      "backend": "cpu",
+      "language": "zh",
+      "mode": "stream",
+      "load_ms": 2245.3505001030862,
+      "id": "nemo-cpu-zh-stream",
+      "audio_filename": null,
+      "runs": [
+        {
+          "text": "开放时间早上九点至下午五点",
+          "duration_sec": 5.592,
+          "elapsed_ms": 1268.6494002118707,
+          "rtf": 0.22686863380040606,
+          "first_text_ms": 287.4609003774822,
+          "tail_ms": null,
+          "iteration": 0,
+          "rss_before_bytes": 981032960,
+          "rss_after_bytes": 981852160,
+          "peak_rss_bytes": 990765056,
+          "final_segments": [
+            "开放时间早上九点至下午五点"
+          ]
+        }
+      ]
+    },
+    {
+      "engine": "nemo",
+      "backend": "vulkan",
+      "language": "en",
+      "mode": "offline",
+      "load_ms": 1136.240300256759,
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "disable_batching": true,
+      "skip_warmup": false,
+      "endpointing": false,
+      "id": "nemo-vulkan-en-offline-no-batching",
+      "audio_filename": "en.wav",
+      "runs": [
+        {
+          "text": "The tribal chieftain called for the boy and presented him with fifty pieces of gold.",
+          "duration_sec": 7.152,
+          "elapsed_ms": 400.42430022731423,
+          "rtf": 0.05598773772753275,
+          "iteration": 0,
+          "rss_before_bytes": 155897856,
+          "rss_after_bytes": 159457280,
+          "peak_rss_bytes": 167854080
+        },
+        {
+          "text": "The tribal chieftain called for the boy and presented him with fifty pieces of gold.",
+          "duration_sec": 7.152,
+          "elapsed_ms": 390.1296001859009,
+          "rtf": 0.054548322173643866,
+          "iteration": 1,
+          "rss_before_bytes": 159457280,
+          "rss_after_bytes": 160096256,
+          "peak_rss_bytes": 167854080
+        },
+        {
+          "text": "The tribal chieftain called for the boy and presented him with fifty pieces of gold.",
+          "duration_sec": 7.152,
+          "elapsed_ms": 390.11629996821284,
+          "rtf": 0.05454646252351969,
+          "iteration": 2,
+          "rss_before_bytes": 160096256,
+          "rss_after_bytes": 158687232,
+          "peak_rss_bytes": 167854080
+        }
+      ]
+    },
+    {
+      "engine": "nemo",
+      "backend": "vulkan",
+      "language": "en",
+      "mode": "offline",
+      "load_ms": 544.5596999488771,
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "disable_batching": false,
+      "skip_warmup": true,
+      "endpointing": false,
+      "id": "nemo-vulkan-en-offline-no-warmup",
+      "audio_filename": "en.wav",
+      "runs": [
+        {
+          "text": "The tribal chieftain called for the boy and presented him with fifty pieces of gold.",
+          "duration_sec": 7.152,
+          "elapsed_ms": 643.6861003749073,
+          "rtf": 0.09000085296069732,
+          "iteration": 0,
+          "rss_before_bytes": 73031680,
+          "rss_after_bytes": 156680192,
+          "peak_rss_bytes": 172552192
+        },
+        {
+          "text": "The tribal chieftain called for the boy and presented him with fifty pieces of gold.",
+          "duration_sec": 7.152,
+          "elapsed_ms": 403.5570998676121,
+          "rtf": 0.05642576899714934,
+          "iteration": 1,
+          "rss_before_bytes": 156680192,
+          "rss_after_bytes": 159928320,
+          "peak_rss_bytes": 172552192
+        },
+        {
+          "text": "The tribal chieftain called for the boy and presented him with fifty pieces of gold.",
+          "duration_sec": 7.152,
+          "elapsed_ms": 387.4240997247398,
+          "rtf": 0.054170036314980394,
+          "iteration": 2,
+          "rss_before_bytes": 159928320,
+          "rss_after_bytes": 157528064,
+          "peak_rss_bytes": 172552192
+        }
+      ]
+    },
+    {
+      "engine": "nemo",
+      "backend": "vulkan",
+      "language": "en",
+      "mode": "offline",
+      "load_ms": null,
+      "error": "Nemotron startup exited 3221226505; see server log",
+      "id": "nemo-vulkan-en-offline",
+      "audio_filename": null,
+      "runs": []
+    },
+    {
+      "engine": "nemo",
+      "backend": "vulkan",
+      "language": "en",
+      "mode": "realtime",
+      "load_ms": 1136.1739998683333,
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "disable_batching": true,
+      "skip_warmup": false,
+      "endpointing": false,
+      "id": "nemo-vulkan-en-realtime-validated",
+      "audio_filename": "en.wav",
+      "runs": [
+        {
+          "text": "The tribal chieftain called for the boy and presented him with fifty pieces of gold.",
+          "duration_sec": 7.152,
+          "elapsed_ms": 7333.045199979097,
+          "rtf": 1.025313926171574,
+          "first_text_ms": 1625.3001000732183,
+          "tail_ms": 181.04519997909665,
+          "iteration": 0,
+          "rss_before_bytes": 155918336,
+          "rss_after_bytes": 158912512,
+          "peak_rss_bytes": 168148992,
+          "final_segments": [
+            "The tribal chieftain called for the boy and presented him with fifty pieces of gold."
+          ]
+        }
+      ],
+      "gpu_memory_after_runs": [
+        {
+          "DedicatedUsage": 965853184,
+          "SharedUsage": 65736704
+        }
+      ]
+    },
+    {
+      "engine": "nemo",
+      "backend": "vulkan",
+      "language": "en",
+      "mode": "stream",
+      "load_ms": 1156.0949999839067,
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "disable_batching": true,
+      "skip_warmup": false,
+      "endpointing": false,
+      "id": "nemo-vulkan-en-stream-long-english",
+      "audio_filename": "en-long.wav",
+      "runs": [
+        {
+          "text": "It was the best of times it was the worst of times. It was the age of wisdom. It was the age of foolishness. It was the epoch of belief. It was the epoch of incredulity. It was a season of light. It was a season of darkness. It was the spring of hope. It was the winter of despair. We had everything before us. We had nothing before us we were all going direct to heaven we were all going direct the other way. In short, the period was so far like the present period that some of its noisiest authorities insisted on its being received for good or for evil in the superlative degree of comparison only.",
+          "duration_sec": 44.374125,
+          "elapsed_ms": 2485.069999936968,
+          "rtf": 0.05600268174159982,
+          "first_text_ms": 105.50499986857176,
+          "tail_ms": null,
+          "iteration": 0,
+          "rss_before_bytes": 155922432,
+          "rss_after_bytes": 156729344,
+          "peak_rss_bytes": 168005632,
+          "final_segments": [
+            "It was the best of times it was the worst of times. It was the age of wisdom. It was the age of foolishness. It was the epoch of belief. It was the epoch of incredulity. It was a season of light. It was a season of darkness. It was the spring of hope. It was the winter of despair. We had everything before us. We had nothing before us we were all going direct to heaven we were all going direct the other way. In short, the period was so far like the present period that some of its noisiest authorities insisted on its being received for good or for evil in the superlative degree of comparison only."
+          ]
+        }
+      ],
+      "gpu_memory_after_runs": [
+        {
+          "DedicatedUsage": 965849088,
+          "SharedUsage": 63639552
+        }
+      ]
+    },
+    {
+      "engine": "nemo",
+      "backend": "vulkan",
+      "language": "ja",
+      "mode": "offline",
+      "load_ms": 1139.1340997070074,
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "disable_batching": true,
+      "skip_warmup": false,
+      "endpointing": false,
+      "id": "nemo-vulkan-ja-offline-validated",
+      "audio_filename": "ja.wav",
+      "runs": [
+        {
+          "text": "うちの中学は弁当性で持っていけない場合は五十円の学校販売のパンを買う",
+          "duration_sec": 7.2,
+          "elapsed_ms": 435.24250015616417,
+          "rtf": 0.06045034724391169,
+          "iteration": 0,
+          "rss_before_bytes": 156028928,
+          "rss_after_bytes": 159625216,
+          "peak_rss_bytes": 168148992
+        },
+        {
+          "text": "うちの中学は弁当性で持っていけない場合は五十円の学校販売のパンを買う",
+          "duration_sec": 7.2,
+          "elapsed_ms": 401.02370036765933,
+          "rtf": 0.05569773616217491,
+          "iteration": 1,
+          "rss_before_bytes": 159625216,
+          "rss_after_bytes": 160059392,
+          "peak_rss_bytes": 168148992
+        },
+        {
+          "text": "うちの中学は弁当性で持っていけない場合は五十円の学校販売のパンを買う",
+          "duration_sec": 7.2,
+          "elapsed_ms": 409.77839985862374,
+          "rtf": 0.056913666647031076,
+          "iteration": 2,
+          "rss_before_bytes": 160059392,
+          "rss_after_bytes": 158425088,
+          "peak_rss_bytes": 168148992
+        }
+      ],
+      "gpu_memory_after_runs": [
+        {
+          "DedicatedUsage": 972685312,
+          "SharedUsage": 64512000
+        }
+      ]
+    },
+    {
+      "engine": "nemo",
+      "backend": "vulkan",
+      "language": "ja",
+      "mode": "realtime",
+      "load_ms": 544.7792997583747,
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "disable_batching": false,
+      "skip_warmup": true,
+      "endpointing": false,
+      "id": "nemo-vulkan-ja-realtime-no-warmup",
+      "audio_filename": "ja.wav",
+      "runs": [
+        {
+          "text": "うちの中学は弁当性で持っていけない場合は五十円の学校販売のパンを買う",
+          "duration_sec": 7.2,
+          "elapsed_ms": 7416.783299762756,
+          "rtf": 1.0301087916337162,
+          "first_text_ms": 1020.7317997701466,
+          "tail_ms": 216.78329976275563,
+          "iteration": 0,
+          "rss_before_bytes": 72908800,
+          "rss_after_bytes": 156790784,
+          "peak_rss_bytes": 169828352,
+          "final_segments": [
+            "うちの中学は弁当性で持っていけない場合は五十円の学校販売のパンを買う"
+          ]
+        }
+      ]
+    },
+    {
+      "engine": "nemo",
+      "backend": "vulkan",
+      "language": "zh",
+      "mode": "offline",
+      "load_ms": 1134.8442998714745,
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "disable_batching": true,
+      "skip_warmup": false,
+      "endpointing": false,
+      "id": "nemo-vulkan-zh-offline-second-clip",
+      "audio_filename": "zh-long.wav",
+      "runs": [
+        {
+          "text": "甚 至 出 现 交 易 几 乎 停 滞 的 情 况",
+          "duration_sec": 4.2039375,
+          "elapsed_ms": 239.11199998110533,
+          "rtf": 0.056878105343170615,
+          "iteration": 0,
+          "rss_before_bytes": 155918336,
+          "rss_after_bytes": 158388224,
+          "peak_rss_bytes": 167931904
+        },
+        {
+          "text": "甚 至 出 现 交 易 几 乎 停 滞 的 情 况",
+          "duration_sec": 4.2039375,
+          "elapsed_ms": 232.68020013347268,
+          "rtf": 0.055348158751996834,
+          "iteration": 1,
+          "rss_before_bytes": 158388224,
+          "rss_after_bytes": 157855744,
+          "peak_rss_bytes": 167931904
+        },
+        {
+          "text": "甚 至 出 现 交 易 几 乎 停 滞 的 情 况",
+          "duration_sec": 4.2039375,
+          "elapsed_ms": 232.1728002279997,
+          "rtf": 0.05522746240352044,
+          "iteration": 2,
+          "rss_before_bytes": 157855744,
+          "rss_after_bytes": 158924800,
+          "peak_rss_bytes": 167931904
+        }
+      ],
+      "gpu_memory_after_runs": [
+        {
+          "DedicatedUsage": 968216576,
+          "SharedUsage": 64126976
+        }
+      ]
+    },
+    {
+      "engine": "nemo",
+      "backend": "vulkan",
+      "language": "zh",
+      "mode": "offline",
+      "load_ms": 1162.295099813491,
+      "architecture": null,
+      "submitted_pcm_sha256": "4044b0963786a001e8196cbcf3c38612e92655d07c718b0506f5f1a50b5b2cc5",
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "disable_batching": true,
+      "skip_warmup": false,
+      "endpointing": false,
+      "endpoint_ms": null,
+      "id": "nemo-vulkan-zh-offline-tools-verified",
+      "audio_filename": "zh.wav",
+      "runs": [
+        {
+          "text": "开放时间早上九点至下午五点",
+          "duration_sec": 5.592,
+          "elapsed_ms": 308.51150024682283,
+          "rtf": 0.05517015383526875,
+          "iteration": 0,
+          "rss_before_bytes": 155758592,
+          "rss_after_bytes": 160030720,
+          "peak_rss_bytes": 167936000
+        }
+      ],
+      "gpu_memory_after_runs": [
+        {
+          "DedicatedUsage": 971767808,
+          "SharedUsage": 64303104
+        }
+      ]
+    },
+    {
+      "engine": "nemo",
+      "backend": "vulkan",
+      "language": "zh",
+      "mode": "offline",
+      "load_ms": 1142.394700087607,
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "disable_batching": true,
+      "skip_warmup": false,
+      "endpointing": false,
+      "id": "nemo-vulkan-zh-offline-validated",
+      "audio_filename": "zh.wav",
+      "runs": [
+        {
+          "text": "开放时间早上九点至下午五点",
+          "duration_sec": 5.592,
+          "elapsed_ms": 309.33859990909696,
+          "rtf": 0.055318061500196164,
+          "iteration": 0,
+          "rss_before_bytes": 155852800,
+          "rss_after_bytes": 158347264,
+          "peak_rss_bytes": 168042496
+        },
+        {
+          "text": "开放时间早上九点至下午五点",
+          "duration_sec": 5.592,
+          "elapsed_ms": 303.95770026370883,
+          "rtf": 0.0543558119212641,
+          "iteration": 1,
+          "rss_before_bytes": 158347264,
+          "rss_after_bytes": 158916608,
+          "peak_rss_bytes": 168042496
+        },
+        {
+          "text": "开放时间早上九点至下午五点",
+          "duration_sec": 5.592,
+          "elapsed_ms": 322.0464996993542,
+          "rtf": 0.057590575768840156,
+          "iteration": 2,
+          "rss_before_bytes": 158916608,
+          "rss_after_bytes": 157827072,
+          "peak_rss_bytes": 168042496
+        }
+      ],
+      "gpu_memory_after_runs": [
+        {
+          "DedicatedUsage": 971767808,
+          "SharedUsage": 64303104
+        }
+      ]
+    },
+    {
+      "engine": "nemo",
+      "backend": "vulkan",
+      "language": "zh",
+      "mode": "offline",
+      "load_ms": 14961.962700355798,
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "id": "nemo-vulkan-zh-offline",
+      "audio_filename": "zh.wav",
+      "runs": [
+        {
+          "text": "开放时间早上九点至下午五点",
+          "duration_sec": 5.592,
+          "elapsed_ms": 309.3016999773681,
+          "rtf": 0.055311462799958536,
+          "iteration": 0,
+          "rss_before_bytes": 247906304,
+          "rss_after_bytes": 250032128,
+          "peak_rss_bytes": 362864640
+        },
+        {
+          "text": "开放时间早上九点至下午五点",
+          "duration_sec": 5.592,
+          "elapsed_ms": 303.51269990205765,
+          "rtf": 0.05427623388806467,
+          "iteration": 1,
+          "rss_before_bytes": 250032128,
+          "rss_after_bytes": 250060800,
+          "peak_rss_bytes": 362864640
+        },
+        {
+          "text": "开放时间早上九点至下午五点",
+          "duration_sec": 5.592,
+          "elapsed_ms": 300.4733002744615,
+          "rtf": 0.053732707488279956,
+          "iteration": 2,
+          "rss_before_bytes": 250060800,
+          "rss_after_bytes": 250081280,
+          "peak_rss_bytes": 362864640
+        }
+      ]
+    },
+    {
+      "engine": "nemo",
+      "backend": "vulkan",
+      "language": "zh",
+      "mode": "realtime",
+      "load_ms": 529.2696999385953,
+      "repeat_audio": 1,
+      "silence_sec": 0,
+      "disable_batching": false,
+      "skip_warmup": true,
+      "endpointing": false,
+      "id": "nemo-vulkan-zh-realtime-no-warmup",
+      "audio_filename": "zh.wav",
+      "runs": [
+        {
+          "text": "开放时间早上九点至下午五点",
+          "duration_sec": 5.592,
+          "elapsed_ms": 5801.300199702382,
+          "rtf": 1.037428504953931,
+          "first_text_ms": 1618.4707996435463,
+          "tail_ms": 209.3001997023821,
+          "iteration": 0,
+          "rss_before_bytes": 73154560,
+          "rss_after_bytes": 157278208,
+          "peak_rss_bytes": 169771008,
+          "final_segments": [
+            "开放时间早上九点至下午五点"
+          ]
+        },
+        {
+          "text": "开放时间早上九点至下午五点",
+          "duration_sec": 5.592,
+          "elapsed_ms": 5689.438600093126,
+          "rtf": 1.0174246423628623,
+          "first_text_ms": 1622.735799755901,
+          "tail_ms": 97.4386000931263,
+          "iteration": 1,
+          "rss_before_bytes": 157278208,
+          "rss_after_bytes": 159141888,
+          "peak_rss_bytes": 169771008,
+          "final_segments": [
+            "开放时间早上九点至下午五点"
+          ]
+        }
+      ]
+    },
+    {
+      "engine": "nemo",
+      "backend": "vulkan",
+      "language": "zh",
+      "mode": "realtime",
+      "load_ms": 1131.3264002092183,
+      "architecture": null,
+      "submitted_pcm_sha256": "e0f04258a5767a659ee8eded42535b4e96eb89b066634e0538ddb202b4fef683",
+      "repeat_audio": 5,
+      "silence_sec": 0,
+      "disable_batching": true,
+      "skip_warmup": false,
+      "endpointing": true,
+      "endpoint_ms": 2000,
+      "id": "nemo-vulkan-zh-realtime-repeat5-continuous-eou2000",
+      "audio_filename": "zh.wav",
+      "runs": [
+        {
+          "text": "开放时间早上九点至下午五点 开放时间早上九点日下午五点 太放时间早上九点至下午五点 太放时间早上九点至下午五点, 放时间早上九点日下午五点",
+          "duration_sec": 32.96,
+          "elapsed_ms": 33136.60450000316,
+          "rtf": 1.00535814623796,
+          "first_text_ms": 1625.4489999264479,
+          "tail_ms": 176.60450000315905,
+          "iteration": 0,
+          "rss_before_bytes": 156053504,
+          "rss_after_bytes": 158867456,
+          "peak_rss_bytes": 168091648,
+          "final_segments": [
+            "开放时间早上九点至下午五点",
+            "开放时间早上九点日下午五点",
+            "太放时间早上九点至下午五点",
+            "太放时间早上九点至下午五点,",
+            "放时间早上九点日下午五点"
+          ]
+        }
+      ],
+      "gpu_memory_after_runs": [
+        {
+          "DedicatedUsage": 965853184,
+          "SharedUsage": 65736704
+        }
+      ]
+    },
+    {
+      "engine": "nemo",
+      "backend": "vulkan",
+      "language": "zh",
+      "mode": "realtime",
+      "load_ms": 1137.3733999207616,
+      "repeat_audio": 5,
+      "silence_sec": 0,
+      "disable_batching": true,
+      "skip_warmup": false,
+      "endpointing": false,
+      "id": "nemo-vulkan-zh-realtime-repeat5-continuous-no-eou",
+      "audio_filename": "zh.wav",
+      "runs": [
+        {
+          "text": "开放时间早上九点至下午五点开放时间早上九点日下午五点开放时间早上九点至下午五点看时间早上九点日下午五点开放时间早上九点日下午五点",
+          "duration_sec": 32.96,
+          "elapsed_ms": 33148.75930035487,
+          "rtf": 1.0057269205204753,
+          "first_text_ms": 1612.3574003577232,
+          "tail_ms": 188.75930035486817,
+          "iteration": 0,
+          "rss_before_bytes": 155840512,
+          "rss_after_bytes": 158834688,
+          "peak_rss_bytes": 167931904,
+          "final_segments": [
+            "开放时间早上九点至下午五点开放时间早上九点日下午五点开放时间早上九点至下午五点看时间早上九点日下午五点开放时间早上九点日下午五点"
+          ]
+        }
+      ],
+      "gpu_memory_after_runs": [
+        {
+          "DedicatedUsage": 965853184,
+          "SharedUsage": 65736704
+        }
+      ]
+    },
+    {
+      "engine": "nemo",
+      "backend": "vulkan",
+      "language": "zh",
+      "mode": "realtime",
+      "load_ms": 1133.260800037533,
+      "repeat_audio": 5,
+      "silence_sec": 0,
+      "disable_batching": true,
+      "skip_warmup": false,
+      "endpointing": true,
+      "id": "nemo-vulkan-zh-realtime-repeat5-continuous",
+      "audio_filename": "zh.wav",
+      "runs": [
+        {
+          "text": "开放时间早上九点至 我五点 开放时间早上九点至 我五点 开放时间早上九点至 我点 开放时间早上九点至 我五点 开放时间早上九点至 五点",
+          "duration_sec": 32.96,
+          "elapsed_ms": 33030.454699881375,
+          "rtf": 1.0021375819138767,
+          "first_text_ms": 1612.5382999889553,
+          "tail_ms": 70.45469988137484,
+          "iteration": 0,
+          "rss_before_bytes": 155922432,
+          "rss_after_bytes": 158883840,
+          "peak_rss_bytes": 167784448,
+          "final_segments": [
+            "开放时间早上九点至",
+            "我五点",
+            "开放时间早上九点至",
+            "我五点",
+            "开放时间早上九点至",
+            "我点",
+            "开放时间早上九点至",
+            "我五点",
+            "开放时间早上九点至",
+            "五点",
+            ""
+          ]
+        }
+      ],
+      "gpu_memory_after_runs": [
+        {
+          "DedicatedUsage": 965853184,
+          "SharedUsage": 65736704
+        }
+      ]
+    },
+    {
+      "engine": "nemo",
+      "backend": "vulkan",
+      "language": "zh",
+      "mode": "realtime",
+      "load_ms": null,
+      "error": "Nemotron startup exited 3221226505; see server log",
+      "id": "nemo-vulkan-zh-realtime",
+      "audio_filename": null,
+      "runs": []
+    },
+    {
+      "engine": "nemo",
+      "backend": "vulkan",
+      "language": "zh",
+      "mode": "stream",
+      "load_ms": 1139.4446999765933,
+      "repeat_audio": 1,
+      "silence_sec": 8,
+      "disable_batching": true,
+      "skip_warmup": false,
+      "endpointing": false,
+      "id": "nemo-vulkan-zh-stream-silence8-silence",
+      "audio_filename": "zh.wav",
+      "runs": [
+        {
+          "text": "",
+          "duration_sec": 8.0,
+          "elapsed_ms": 436.1445000395179,
+          "rtf": 0.054518062504939735,
+          "first_text_ms": null,
+          "tail_ms": null,
+          "iteration": 0,
+          "rss_before_bytes": 155758592,
+          "rss_after_bytes": 156487680,
+          "peak_rss_bytes": 167923712,
+          "final_segments": [
+            ""
+          ]
+        }
+      ],
+      "gpu_memory_after_runs": [
+        {
+          "DedicatedUsage": 965718016,
+          "SharedUsage": 63639552
+        }
+      ]
+    }
+  ]
+}

@@ -1,27 +1,44 @@
 using System.Buffers.Binary;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
-using SherpaOnnx;
 using SteamVRTranslator.App.Configuration;
 using SteamVRTranslator.App.Diagnostics;
 
 namespace SteamVRTranslator.App.Subtitles;
 
-public sealed class SubtitleAudioProcessor
+public sealed class SubtitleAudioProcessor : IAsyncDisposable
 {
     public const int SampleRate = 16000;
     private readonly AppLog _log;
+    private readonly SubtitleDiarizationModelCache _models;
 
-    public SubtitleAudioProcessor(AppLog log)
+    public SubtitleAudioProcessor(AppLog log) : this(log, (key, token) => new ResidentSubtitleDiarizationModels(key, token)) { }
+
+    internal SubtitleAudioProcessor(AppLog log, Func<SubtitleDiarizationModelKey, CancellationToken, ISubtitleDiarizationModels> create)
     {
         _log = log;
+        _models = new SubtitleDiarizationModelCache(log, create);
     }
+
+    internal void UpdateConfiguration(SubtitleDiarizationConfiguration? configuration) => _models.UpdateConfiguration(configuration);
+    internal Task<SubtitleDiarizationModelCache.Lease> AcquireModelsAsync(SubtitleDiarizationConfiguration configuration, CancellationToken token) =>
+        _models.AcquireAsync(configuration, token);
+    internal Task ReleaseIdleModelsAsync() => _models.ReleaseIdleAsync();
+    public ValueTask DisposeAsync() => _models.DisposeAsync();
 
     public async Task<SubtitleAudioDocument> AnalyzeAsync(
         string audioPath,
         SubtitleDiarizationConfiguration configuration,
         SpeakerIdentityRegistry speakerRegistry,
         CancellationToken cancellationToken)
+    {
+        await using var lease = configuration.Enabled ? await AcquireModelsAsync(configuration, cancellationToken).ConfigureAwait(false) : null;
+        return await AnalyzeAsync(audioPath, configuration, speakerRegistry, lease, cancellationToken).ConfigureAwait(false);
+    }
+
+    internal async Task<SubtitleAudioDocument> AnalyzeAsync(
+        string audioPath, SubtitleDiarizationConfiguration configuration, SpeakerIdentityRegistry speakerRegistry,
+        SubtitleDiarizationModelCache.Lease? lease, CancellationToken cancellationToken)
     {
         var samples = await Task.Run(
             () => ReadMonoSamples(audioPath, cancellationToken),
@@ -39,55 +56,24 @@ public sealed class SubtitleAudioProcessor
                 [new SubtitleSpeakerSegment(0, 0, duration.TotalSeconds)]);
         }
 
-        var segmentationPath = ResolveRequiredPath(
-            configuration.SegmentationModelPath,
-            "Pyannote 说话人分段模型");
-        var embeddingPath = ResolveRequiredPath(
-            configuration.EmbeddingModelPath,
-            "3D-Speaker 声纹模型");
-        var threads = Math.Clamp(configuration.CpuThreadCount, 1, Math.Max(1, Environment.ProcessorCount));
+        if (lease is null) throw new InvalidOperationException("字幕说话人模型尚未准备完成。");
         _log.Info(
             $"[subtitles] 说话人分离开始：音频={Path.GetFileName(audioPath)}，" +
-            $"时长={duration.TotalSeconds:F2}s，线程={threads}，阈值={configuration.ClusteringThreshold:F2}。");
+            $"时长={duration.TotalSeconds:F2}s，线程={lease.Key.Threads}，阈值={configuration.ClusteringThreshold:F2}。");
 
         var started = System.Diagnostics.Stopwatch.StartNew();
-        var segments = await Task.Run(() =>
+        var stableSegments = await lease.ProcessAsync(models =>
         {
-            var sherpaConfiguration = new OfflineSpeakerDiarizationConfig();
-            sherpaConfiguration.Segmentation.Pyannote.Model = segmentationPath;
-            sherpaConfiguration.Segmentation.NumThreads = threads;
-            sherpaConfiguration.Embedding.Model = embeddingPath;
-            sherpaConfiguration.Embedding.NumThreads = threads;
-            sherpaConfiguration.Clustering.NumClusters = 0;
-            sherpaConfiguration.Clustering.Threshold = (float)configuration.ClusteringThreshold;
-            using var diarizer = new OfflineSpeakerDiarization(sherpaConfiguration);
-            if (diarizer.SampleRate != SampleRate)
-            {
-                throw new InvalidOperationException(
-                    $"说话人模型要求 {diarizer.SampleRate} Hz，当前处理链为 {SampleRate} Hz。");
-            }
-
+            var segments = models.Segment(samples, configuration.ClusteringThreshold);
+            // Native inference is synchronous. Wait for it before cancellation/disposal,
+            // and never publish cancelled results or mutate the speaker registry with them.
             cancellationToken.ThrowIfCancellationRequested();
-            return diarizer.Process(samples)
-                .Select(segment => new SubtitleSpeakerSegment(
-                    segment.Speaker,
-                    Math.Max(0, segment.Start),
-                    Math.Min(duration.TotalSeconds, segment.End)))
-                .Where(segment => segment.EndSeconds - segment.StartSeconds >= 0.2)
-                .OrderBy(segment => segment.StartSeconds)
-                .ToArray();
-        }, cancellationToken);
+            return AssignStableSpeakers(samples, MergeAdjacent(segments), models, speakerRegistry, cancellationToken);
+        }, cancellationToken).ConfigureAwait(false);
         started.Stop();
-        var merged = MergeAdjacent(segments);
-        var stableSegments = AssignStableSpeakers(
-            samples,
-            merged,
-            embeddingPath,
-            threads,
-            speakerRegistry);
         _log.Info(
             $"[subtitles] 说话人分离完成：耗时={started.Elapsed.TotalMilliseconds:F0}ms，" +
-            $"原始分段={segments.Length}，合并后={merged.Count}，" +
+            $"分段={stableSegments.Count}，" +
             $"说话人={stableSegments.Select(segment => segment.Speaker).Distinct().Count()}，" +
             $"会话声纹={speakerRegistry.Count}。");
         return new SubtitleAudioDocument(samples, stableSegments);
@@ -188,19 +174,15 @@ public sealed class SubtitleAudioProcessor
     private static IReadOnlyList<SubtitleSpeakerSegment> AssignStableSpeakers(
         float[] samples,
         IReadOnlyList<SubtitleSpeakerSegment> segments,
-        string embeddingPath,
-        int threads,
-        SpeakerIdentityRegistry registry)
+        ISubtitleDiarizationModels models,
+        SpeakerIdentityRegistry registry,
+        CancellationToken cancellationToken)
     {
-        var extractorConfiguration = new SpeakerEmbeddingExtractorConfig
-        {
-            Model = embeddingPath,
-            NumThreads = threads
-        };
-        using var extractor = new SpeakerEmbeddingExtractor(extractorConfiguration);
         var stableIds = new Dictionary<int, int>();
+        var embeddings = new Dictionary<int, float[]?>();
         foreach (var group in segments.GroupBy(segment => segment.Speaker))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             const int maximumSamples = SampleRate * 12;
             var speakerSamples = new List<float>(maximumSamples);
             foreach (var segment in group)
@@ -224,30 +206,16 @@ public sealed class SubtitleAudioProcessor
                 }
             }
 
-            using var stream = extractor.CreateStream();
-            stream.AcceptWaveform(SampleRate, speakerSamples.ToArray());
-            stream.InputFinished();
-            stableIds[group.Key] = extractor.IsReady(stream)
-                ? registry.Resolve(extractor.Compute(stream))
-                : registry.ReserveAnonymous();
+            embeddings[group.Key] = models.Embed(speakerSamples.ToArray());
         }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        foreach (var (speaker, embedding) in embeddings)
+            stableIds[speaker] = embedding is null ? registry.ReserveAnonymous() : registry.Resolve(embedding);
 
         return segments
             .Select(segment => segment with { Speaker = stableIds[segment.Speaker] })
             .ToArray();
-    }
-
-    private static string ResolveRequiredPath(string path, string displayName)
-    {
-        var resolved = Path.IsPathRooted(path)
-            ? Path.GetFullPath(path)
-            : Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, path));
-        if (!File.Exists(resolved))
-        {
-            throw new FileNotFoundException($"{displayName}未安装：{resolved}", resolved);
-        }
-
-        return resolved;
     }
 
     private sealed class ChannelAveragingSampleProvider : ISampleProvider

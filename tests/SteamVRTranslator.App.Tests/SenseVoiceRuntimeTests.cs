@@ -8,6 +8,26 @@ namespace SteamVRTranslator.App.Tests;
 public sealed class SenseVoiceRuntimeTests
 {
     [Fact]
+    public async Task ResidentWorkerStartupCanBeCancelledBeforeReady()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "sensevoice-start-cancel-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var script = Path.Combine(root, "wait-for-input.cmd");
+        // A local stub blocks on stdin without printing READY; no real model is needed.
+        File.WriteAllText(script, "@echo off\r\nset /p pending=\r\n");
+        try
+        {
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Task.Run(() =>
+            {
+                using var worker = new SenseVoiceResidentWorker(
+                    Path.Combine(Environment.SystemDirectory, "cmd.exe"), ["/d", "/c", script], root, cancellation.Token);
+            }).WaitAsync(TimeSpan.FromSeconds(5)));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public void InstallationCheckUsesTheRuntimeForTheSelectedBackend()
     {
         var root = Path.Combine(Path.GetTempPath(), $"sensevoice-install-{Guid.NewGuid():N}");
