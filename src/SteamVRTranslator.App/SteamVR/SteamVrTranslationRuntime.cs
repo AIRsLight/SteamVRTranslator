@@ -75,6 +75,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
     private readonly object _lifecycleSync = new();
     private readonly WasapiCommandRecorder _commandRecorder;
     private readonly WasapiCommandRecorder _voiceInputRecorder;
+    private readonly VoiceInputCueOutput _voiceInputCues;
     private VrChatOscOutput? _vrChatOscOutput;
     private readonly CommandPressTracker _commandPress;
     private bool _invertResultScroll;
@@ -172,6 +173,8 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         _selection = new SelectionStateMachine(TimeSpan.FromSeconds(configuration.SelectionTimeoutSeconds));
         _commandRecorder = new WasapiCommandRecorder(configuration.Speech, log);
         _voiceInputRecorder = new WasapiCommandRecorder(configuration.Speech, log);
+        _voiceInputCues = new VoiceInputCueOutput(configuration.VrChatVoiceInput.Cues, log);
+        _voiceInputRecorder.RecordingFailed += OnVoiceInputRecordingFailed;
         if (configuration.VrChatVoiceInput.Enabled)
         {
             _vrChatOscOutput = new VrChatOscOutput(configuration.VrChatVoiceInput);
@@ -325,6 +328,12 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         _configuration.VrChatVoiceInput.StreamingChunkIntervalMilliseconds = milliseconds;
         _vrChatOscOutput?.UpdateStreamingChunkInterval(milliseconds);
         _log.Info($"[configuration] OSC 超长文本分段间隔已热更新：{milliseconds} ms。");
+    }
+
+    public void DisableVoiceInputCues()
+    {
+        _configuration.VrChatVoiceInput.Cues.Enabled = false;
+        _voiceInputCues.Disable();
     }
 
     public void ApplyPointerRaySetting(bool enabled)
@@ -592,6 +601,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         CancelPendingWpfOverlayCommands();
         CancelPendingDiagnosticResultOverlayCommands();
 
+        _voiceInputCues.Cancel();
         Publish(L("Runtime.Stopped"), SelectionState.Idle);
     }
 
@@ -921,6 +931,8 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             await _toolbarOscTask;
         }
         _commandRecorder.Dispose();
+        _voiceInputCues.Dispose();
+        _voiceInputRecorder.RecordingFailed -= OnVoiceInputRecordingFailed;
         _voiceInputRecorder.Dispose();
         _vrChatOscOutput?.Dispose();
         foreach (var source in _interactiveOverlays
@@ -2753,6 +2765,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         {
             _voiceInputRecorder.Start();
             _voiceInputPressed = true;
+            _voiceInputCues.Start();
             _log.Info("[voice-input] PTT 按下，开始 VRChat 语音输入录音。");
             _ = SetVrChatTypingSafeAsync(true, cancellationToken);
             Publish(L("Voice.Recording"), _selection.Snapshot.State);
@@ -2760,6 +2773,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         catch (Exception exception)
         {
             _voiceInputPressed = false;
+            _voiceInputCues.Cancel();
             _log.Error("[voice-input] 启动录音失败。", exception);
             if (WasapiErrorClassifier.IsMicrophoneAccessDenied(exception))
             {
@@ -2777,6 +2791,8 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
 
     private async Task CompleteVrChatVoiceInputAsync(CancellationToken cancellationToken)
     {
+        // End at PTT release, including short/empty recordings; recognition can take longer.
+        _ = _voiceInputCues.EndAsync();
         try
         {
             using var audio = await _voiceInputRecorder.StopAsync(cancellationToken);
@@ -2887,6 +2903,8 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             await SetVrChatTypingSafeAsync(false, CancellationToken.None);
         }
     }
+
+    private void OnVoiceInputRecordingFailed(object? sender, EventArgs e) => _voiceInputCues.Cancel();
 
     private async Task SetVrChatTypingSafeAsync(bool isTyping, CancellationToken cancellationToken)
     {
@@ -5158,6 +5176,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         _vrVoiceInputPressed = false;
         if (!_desktopVoiceInputPressed)
         {
+            _voiceInputCues.Cancel();
             _voiceInputPressed = false;
             _voiceInputWasPhysicallyPressed = false;
             _voiceInputReleaseCandidateAt = null;

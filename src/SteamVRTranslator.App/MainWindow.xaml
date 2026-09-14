@@ -959,6 +959,70 @@
                             </StackPanel>
                         </Border>
 
+                        <Border x:Name="VoiceCueSection" Style="{StaticResource SectionStyle}">
+                            <StackPanel>
+                                <TextBlock Text="{loc:Loc Key=Voice.Cues.Title}" FontSize="15" FontWeight="SemiBold" />
+                                <TextBlock Text="{loc:Loc Key=Voice.Cues.Description}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,4,0,14" TextWrapping="Wrap" />
+                                <TextBlock x:Name="VirtualMicrophoneStatusText" TextWrapping="Wrap" FontWeight="SemiBold" Margin="0,0,0,8" />
+                                <TextBlock x:Name="VirtualMicrophonePackageText" TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,0,0,10" />
+                                <WrapPanel Margin="0,0,0,14">
+                                    <Button x:Name="DownloadVbCableButton" Style="{StaticResource ActionButtonStyle}" Content="{loc:Loc Key=Voice.Mic.Download}" Click="DownloadVbCableButton_Click" Margin="0,0,8,6" />
+                                    <Button x:Name="InstallVirtualMicrophoneButton" Style="{StaticResource ActionButtonStyle}" Content="{loc:Loc Key=Voice.Mic.Install}" Click="InstallVirtualMicrophoneButton_Click" Margin="0,0,8,6" />
+                                    <Button x:Name="UninstallVirtualMicrophoneButton" Style="{StaticResource ActionButtonStyle}" Content="{loc:Loc Key=Voice.Mic.Uninstall}" Click="UninstallVirtualMicrophoneButton_Click" ToolTip="{loc:Loc Key=Voice.Mic.Uninstall.Tooltip}" Margin="0,0,8,6" />
+                                    <Button x:Name="RefreshVirtualMicrophoneButton" Style="{StaticResource ActionButtonStyle}" Content="{loc:Loc Key=Voice.Cues.Refresh}" Click="RefreshVoiceCueDevicesButton_Click" Margin="0,0,8,6" />
+                                </WrapPanel>
+                                <Grid x:Name="VbCableDownloadPanel" Visibility="Collapsed" Margin="0,0,0,14">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock x:Name="VbCableDownloadStatusText" FontSize="11" TextWrapping="Wrap" />
+                                        <ProgressBar x:Name="VbCableDownloadProgressBar" Height="4" Margin="0,6,12,0" Minimum="0" Maximum="100" />
+                                    </StackPanel>
+                                    <Button x:Name="CancelVbCableDownloadButton" Grid.Column="1" Style="{StaticResource ActionButtonStyle}" Content="{loc:Loc Key=Voice.Mic.CancelDownload}" Click="CancelVbCableDownloadButton_Click" />
+                                </Grid>
+                                <TextBlock Text="{loc:Loc Key=Voice.Mic.Credit}" FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}" />
+                                <WrapPanel Margin="0,5,0,12">
+                                    <Button Style="{StaticResource ActionButtonStyle}" Content="{loc:Loc Key=Voice.Mic.Website}" Click="VbCableWebsiteButton_Click" Margin="0,0,8,6" />
+                                    <Button Style="{StaticResource ActionButtonStyle}" Content="{loc:Loc Key=Voice.Mic.License}" Click="VbCableLicenseButton_Click" Margin="0,0,0,6" />
+                                </WrapPanel>
+                                <StackPanel x:Name="VoiceCueSettingsPanel">
+                                    <CheckBox x:Name="VoiceCuesEnabledCheckBox" Content="{loc:Loc Key=Voice.Cues.Enable}" FontWeight="SemiBold" Checked="VoiceCuesEnabledCheckBox_Checked" />
+                                    <CheckBox x:Name="VoiceCueEchoCheckBox" Content="{loc:Loc Key=Voice.Cues.Echo}" ToolTip="{loc:Loc Key=Voice.Cues.Echo.Help}" Margin="0,10,0,0" />
+                                    <Grid x:Name="VoiceCueFilesGrid" Margin="0,14,0,0">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                        <CheckBox x:Name="VoiceCueStartCheckBox" Content="{loc:Loc Key=Voice.Cues.Start}" VerticalAlignment="Center" />
+                                        <TextBlock x:Name="VoiceCueStartFileText" Grid.Column="1" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="{StaticResource MutedTextBrush}" />
+                                        <Button Grid.Column="2" Tag="Start" Style="{StaticResource ActionButtonStyle}" Content="{loc:Loc Key=Voice.Cues.File.Choose}" Click="ChooseVoiceCueFileButton_Click" Margin="0,3,8,3" />
+                                        <Button Grid.Column="3" Tag="Start" Style="{StaticResource ActionButtonStyle}" Content="{loc:Loc Key=Voice.Cues.File.Reset}" ToolTip="{loc:Loc Key=Voice.Cues.File.Reset.Help}" Click="ResetVoiceCueFileButton_Click" Margin="0,3,0,3" />
+                                        <CheckBox x:Name="VoiceCueOngoingCheckBox" Grid.Row="1" Content="{loc:Loc Key=Voice.Cues.Ongoing}" VerticalAlignment="Center" />
+                                        <TextBlock x:Name="VoiceCueOngoingFileText" Grid.Row="1" Grid.Column="1" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="{StaticResource MutedTextBrush}" />
+                                        <Button Grid.Row="1" Grid.Column="2" Tag="Ongoing" Style="{StaticResource ActionButtonStyle}" Content="{loc:Loc Key=Voice.Cues.File.Choose}" Click="ChooseVoiceCueFileButton_Click" Margin="0,3,8,3" />
+                                        <Button Grid.Row="1" Grid.Column="3" Tag="Ongoing" Style="{StaticResource ActionButtonStyle}" Content="{loc:Loc Key=Voice.Cues.File.Reset}" ToolTip="{loc:Loc Key=Voice.Cues.File.Reset.Help}" Click="ResetVoiceCueFileButton_Click" Margin="0,3,0,3" />
+                                        <CheckBox x:Name="VoiceCueEndCheckBox" Grid.Row="2" Content="{loc:Loc Key=Voice.Cues.End}" VerticalAlignment="Center" />
+                                        <TextBlock x:Name="VoiceCueEndFileText" Grid.Row="2" Grid.Column="1" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="{StaticResource MutedTextBrush}" />
+                                        <Button Grid.Row="2" Grid.Column="2" Tag="End" Style="{StaticResource ActionButtonStyle}" Content="{loc:Loc Key=Voice.Cues.File.Choose}" Click="ChooseVoiceCueFileButton_Click" Margin="0,3,8,3" />
+                                        <Button Grid.Row="2" Grid.Column="3" Tag="End" Style="{StaticResource ActionButtonStyle}" Content="{loc:Loc Key=Voice.Cues.File.Reset}" ToolTip="{loc:Loc Key=Voice.Cues.File.Reset.Help}" Click="ResetVoiceCueFileButton_Click" Margin="0,3,0,3" />
+                                    </Grid>
+                                    <TextBlock Text="{loc:Loc Key=Voice.Cues.File.Help}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap" />
+                                    <Grid Margin="0,12,0,0">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                        <TextBlock Style="{StaticResource FieldLabelStyle}" Text="{loc:Loc Key=Voice.Cues.Volume}" />
+                                        <Grid Grid.Column="1">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="55" /></Grid.ColumnDefinitions>
+                                            <Slider x:Name="VoiceCueVolumeSlider" Minimum="0" Maximum="100" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="1" Text="{Binding ElementName=VoiceCueVolumeSlider, Path=Value, StringFormat={}{0:0}%}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                        </Grid>
+                                    </Grid>
+                                    <TextBlock Text="{loc:Loc Key=Voice.Cues.Routing}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,12,0,0" TextWrapping="Wrap" />
+                                    <WrapPanel Margin="170,14,0,0">
+                                        <Button x:Name="PreviewVoiceCuesButton" Style="{StaticResource ActionButtonStyle}" Content="{loc:Loc Key=Voice.Cues.Preview}" Click="PreviewVoiceCuesButton_Click" Margin="0,0,8,6" />
+                                        <Button x:Name="TestVoiceCuesButton" Style="{StaticResource ActionButtonStyle}" Content="{loc:Loc Key=Voice.Cues.Test}" Click="TestVoiceCuesButton_Click" Margin="0,0,0,6" />
+                                    </WrapPanel>
+                                    <TextBlock Text="{loc:Loc Key=Voice.Cues.Preview.Help}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
                         <Border Style="{StaticResource SectionStyle}">
                             <StackPanel>
                                 <TextBlock Text="{loc:Loc Key=Voice.Translation.Title}" FontSize="15" FontWeight="SemiBold" />

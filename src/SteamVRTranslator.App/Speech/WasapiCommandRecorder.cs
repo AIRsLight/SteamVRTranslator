@@ -27,6 +27,8 @@ public sealed class WasapiCommandRecorder : IDisposable
 
     public bool IsRecording { get; private set; }
 
+    public event EventHandler? RecordingFailed;
+
     public static IReadOnlyList<CommandMicrophoneInfo> ListCaptureDevices()
     {
         using var enumerator = new MMDeviceEnumerator();
@@ -209,6 +211,7 @@ public sealed class WasapiCommandRecorder : IDisposable
         else
         {
             _stopped?.TrySetException(eventArgs.Exception);
+            RecordingFailed?.Invoke(this, EventArgs.Empty);
         }
     }
 

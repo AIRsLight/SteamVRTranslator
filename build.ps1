@@ -56,6 +56,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Copy-Item -LiteralPath (Join-Path $root "README.md") -Destination $output
+New-Item -ItemType Directory -Force -Path (Join-Path $output 'docs') | Out-Null
+Copy-Item -LiteralPath (Join-Path $root 'docs/VIRTUAL_MICROPHONE.md') -Destination (Join-Path $output 'docs')
 Copy-Item -LiteralPath (Join-Path $root "third_party\openvr\LICENSE") `
     -Destination (Join-Path $output "OPENVR-LICENSE.txt")
 $archiveName = if ($SelfContained) {

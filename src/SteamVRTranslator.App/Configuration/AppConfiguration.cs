@@ -778,6 +778,8 @@ public sealed class VrChatVoiceInputConfiguration
 
     public bool Enabled { get; set; } = true;
 
+    public VoiceInputCueConfiguration Cues { get; set; } = new();
+
     public bool DesktopHotKeyEnabled { get; set; } = true;
 
     public int DesktopHotKeyVirtualKey { get; set; } = 0xA2;

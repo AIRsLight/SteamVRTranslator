@@ -10,11 +10,13 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.Win32;
+using NAudio.CoreAudioApi;
 using SteamVRTranslator.App.AndroidMirror;
 using SteamVRTranslator.App.Configuration;
 using SteamVRTranslator.App.Diagnostics;
 using SteamVRTranslator.App.Localization;
 using SteamVRTranslator.App.Input;
+using SteamVRTranslator.App.Output;
 using SteamVRTranslator.App.Speech;
 using SteamVRTranslator.App.SteamVR;
 using SteamVRTranslator.App.Subtitles;
@@ -73,6 +75,19 @@ public partial class MainWindow : Window
     private bool _promptSettingsDirty;
     private bool _capturingDesktopVoiceHotKey;
     private bool _microphonePrivacyDialogVisible;
+    private CancellationTokenSource? _voiceCuePreviewCancellation;
+    private bool _voiceCuePreviewIsLocal;
+    private bool _voiceCueImportBusy;
+    private readonly VbCableInstallation _virtualMicrophoneInstallation = new();
+    private readonly DispatcherTimer _virtualMicrophoneTimer = new() { Interval = TimeSpan.FromSeconds(3) };
+    private VbCableStatus _virtualMicrophoneStatus = new(false, null, null);
+    private VbCablePackageState _virtualMicrophonePackageState;
+    private CancellationTokenSource? _vbCableDownloadCancellation;
+    private bool _voiceCueWindowClosed;
+    private bool _audioDefaultRestoreWarningShown;
+    private bool _virtualMicrophoneBusy;
+    private bool _virtualMicrophoneChecking;
+    private string? _lastVirtualMicrophoneDiagnostic;
     private string _activePage = "capture";
 
     public MainWindow()
@@ -120,6 +135,9 @@ public partial class MainWindow : Window
 
     protected override void OnClosing(CancelEventArgs e)
     {
+        if (_virtualMicrophoneBusy || _voiceCueImportBusy) { e.Cancel = true; return; }
+        _vbCableDownloadCancellation?.Cancel();
+        _voiceCuePreviewCancellation?.Cancel();
         FlushPendingPromptSave();
         FlushPendingOscChunkIntervalSave();
         if (_allowClose || _runtime is null)
@@ -143,6 +161,11 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _voiceCueWindowClosed = true;
+        _vbCableDownloadCancellation?.Cancel();
+        _virtualMicrophoneInstallation.Dispose();
+        _virtualMicrophoneTimer.Stop();
+        _virtualMicrophoneTimer.Tick -= VirtualMicrophoneTimer_Tick;
         _promptSaveTimer.Stop();
         _promptSaveTimer.Tick -= PromptSaveTimer_Tick;
         _oscChunkIntervalSaveTimer.Stop();
@@ -167,6 +190,8 @@ public partial class MainWindow : Window
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        _virtualMicrophoneTimer.Tick += VirtualMicrophoneTimer_Tick;
+        _virtualMicrophoneTimer.Start();
         SetActivePage("capture");
         UpdateAsrInstallStatus();
         UpdateSubtitleModelStatus();
@@ -181,7 +206,7 @@ public partial class MainWindow : Window
 
     private async void StartButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_startingRuntime)
+        if (_startingRuntime || _voiceCueImportBusy)
         {
             return;
         }
@@ -736,6 +761,7 @@ public partial class MainWindow : Window
         {
             defaultMicrophone.Content = T("Voice.Microphone.Default");
         }
+        UpdateVirtualMicrophoneUi();
         StartButtonText.Text = _runtime is null ? T("Action.StartService") : T("Action.StopService");
         WpfOverlayButtonText.Text = _managerOverlayId is null
             ? T("Action.ShowManagerVr")
@@ -1926,6 +1952,19 @@ public partial class MainWindow : Window
         PopulatePromptControls();
 
         PopulateMicrophones();
+        _virtualMicrophoneStatus = VbCableDevice.Probe();
+        _virtualMicrophonePackageState = _virtualMicrophoneInstallation.GetPackageState();
+        VoiceCuesEnabledCheckBox.IsChecked = _virtualMicrophoneStatus.Ready && _configuration.VrChatVoiceInput.Cues.Enabled;
+        if (!_virtualMicrophoneStatus.Ready) _configuration.VrChatVoiceInput.Cues.Enabled = false;
+        VoiceCueStartCheckBox.IsChecked = _configuration.VrChatVoiceInput.Cues.StartEnabled;
+        VoiceCueOngoingCheckBox.IsChecked = _configuration.VrChatVoiceInput.Cues.OngoingEnabled;
+        VoiceCueEndCheckBox.IsChecked = _configuration.VrChatVoiceInput.Cues.EndEnabled;
+        VoiceCueVolumeSlider.Value = _configuration.VrChatVoiceInput.Cues.VolumePercent;
+        VoiceCueEchoCheckBox.IsChecked = _configuration.VrChatVoiceInput.Cues.EchoEnabled;
+        SetVoiceCueFile(VoiceCueStartFileText, _configuration.VrChatVoiceInput.Cues.StartFilePath);
+        SetVoiceCueFile(VoiceCueOngoingFileText, _configuration.VrChatVoiceInput.Cues.OngoingFilePath);
+        SetVoiceCueFile(VoiceCueEndFileText, _configuration.VrChatVoiceInput.Cues.EndFilePath);
+        UpdateVirtualMicrophoneUi();
         PopulateAsrEngines();
         VoiceInputEnabledCheckBox.IsChecked = _configuration.VrChatVoiceInput.Enabled;
         DesktopVoiceHotKeyEnabledCheckBox.IsChecked =
@@ -2330,6 +2369,7 @@ public partial class MainWindow : Window
             VrChatVoiceInput = new VrChatVoiceInputConfiguration
             {
                 Enabled = voiceEnabled,
+                Cues = ReadVoiceCueControls(),
                 DesktopHotKeyEnabled = DesktopVoiceHotKeyEnabledCheckBox.IsChecked == true,
                 DesktopHotKeyVirtualKey = _configuration.VrChatVoiceInput.DesktopHotKeyVirtualKey,
                 Host = OscHostTextBox.Text.Trim(),
@@ -2396,6 +2436,12 @@ public partial class MainWindow : Window
         DesktopVoiceHotKeyEnabledCheckBox.IsEnabled = true;
         DesktopVoiceHotKeyButton.IsEnabled = true;
         MicrophoneComboBox.IsEnabled = enabled;
+        VoiceCueSettingsPanel.IsEnabled = enabled;
+        UpdateVirtualMicrophoneUi();
+        if (!enabled)
+        {
+            _voiceCuePreviewCancellation?.Cancel();
+        }
         OscHostTextBox.IsEnabled = enabled;
         OscPortTextBox.IsEnabled = enabled;
         OscSendImmediatelyCheckBox.IsEnabled = enabled;
@@ -2744,6 +2790,324 @@ public partial class MainWindow : Window
         SelectByTag(MicrophoneComboBox, _configuration.Speech.DeviceId);
     }
 
+    private void UpdateVirtualMicrophoneUi()
+    {
+        if (VirtualMicrophoneStatusText is null) return;
+        LogVirtualMicrophoneStatus(_virtualMicrophoneStatus);
+        var stopped = _runtime is null && !_startingRuntime && !_stoppingRuntime;
+        VirtualMicrophoneStatusText.Text = T(_virtualMicrophoneBusy ? "Voice.Mic.Busy" :
+            _virtualMicrophoneStatus.Ready ? "Voice.Mic.Ready" :
+            _virtualMicrophoneStatus.Installed ? "Voice.Mic.Unavailable" : "Voice.Mic.NotInstalled");
+        VirtualMicrophonePackageText.Text = T(_virtualMicrophonePackageState switch
+        {
+            VbCablePackageState.Ready => "Voice.Mic.Package.Ready",
+            VbCablePackageState.Invalid => "Voice.Mic.Package.Invalid",
+            _ => "Voice.Mic.Package.Missing"
+        });
+        var downloading = _vbCableDownloadCancellation is not null;
+        DownloadVbCableButton.IsEnabled = !_virtualMicrophoneBusy && !downloading;
+        DownloadVbCableButton.Content = T(_virtualMicrophonePackageState == VbCablePackageState.Ready ? "Voice.Mic.DownloadAgain" : "Voice.Mic.Download");
+        InstallVirtualMicrophoneButton.IsEnabled = stopped && !_virtualMicrophoneBusy && !downloading &&
+            !_virtualMicrophoneStatus.Installed && _virtualMicrophonePackageState == VbCablePackageState.Ready;
+        UninstallVirtualMicrophoneButton.IsEnabled = stopped && !_virtualMicrophoneBusy && !downloading && _virtualMicrophoneStatus.Installed &&
+            _virtualMicrophonePackageState == VbCablePackageState.Ready;
+        RefreshVirtualMicrophoneButton.IsEnabled = !_virtualMicrophoneBusy;
+        VoiceCuesEnabledCheckBox.IsEnabled = stopped && !_virtualMicrophoneBusy && _virtualMicrophoneStatus.Ready;
+        VoiceCueFilesGrid.IsEnabled = stopped && !_virtualMicrophoneBusy && !_voiceCueImportBusy && _voiceCuePreviewCancellation is null;
+        foreach (var field in new[] { VoiceCueStartFileText, VoiceCueOngoingFileText, VoiceCueEndFileText })
+            SetVoiceCueFile(field, field.Tag as string);
+        PreviewVoiceCuesButton.IsEnabled = stopped && !_virtualMicrophoneBusy && !_voiceCueImportBusy &&
+            (_voiceCuePreviewCancellation is null || _voiceCuePreviewIsLocal);
+        TestVoiceCuesButton.IsEnabled = stopped && !_virtualMicrophoneBusy && !_voiceCueImportBusy && _virtualMicrophoneStatus.Ready &&
+            (_voiceCuePreviewCancellation is null || !_voiceCuePreviewIsLocal);
+        if (!_virtualMicrophoneStatus.Ready)
+        {
+            VoiceCuesEnabledCheckBox.IsChecked = false;
+            _configuration.VrChatVoiceInput.Cues.Enabled = false;
+            if (!_voiceCuePreviewIsLocal) _voiceCuePreviewCancellation?.Cancel();
+            _runtime?.DisableVoiceInputCues();
+        }
+    }
+
+    private async void VirtualMicrophoneTimer_Tick(object? sender, EventArgs e) => await RefreshVirtualMicrophoneAsync();
+
+    private void LogVirtualMicrophoneStatus(VbCableStatus status, bool force = false)
+    {
+        var details = $"installed={status.Installed}; ready={status.Ready}; error={status.Error ?? "none"}{Environment.NewLine}{status.DiagnosticDetails}";
+        if (!force && string.Equals(details, _lastVirtualMicrophoneDiagnostic, StringComparison.Ordinal)) return;
+        _lastVirtualMicrophoneDiagnostic = details;
+        _log.Info("[vb-cable] 设备检测：" + details);
+    }
+
+    private async Task RefreshVirtualMicrophoneAsync(bool refreshPackage = false)
+    {
+        if (_voiceCueWindowClosed || _virtualMicrophoneBusy || _virtualMicrophoneChecking) return;
+        _virtualMicrophoneChecking = true;
+        try
+        {
+            _virtualMicrophoneStatus = await Task.Run(VbCableDevice.Probe);
+            LogVirtualMicrophoneStatus(_virtualMicrophoneStatus, force: refreshPackage);
+            if (refreshPackage) _virtualMicrophonePackageState = await Task.Run(_virtualMicrophoneInstallation.GetPackageState);
+            if (_virtualMicrophoneStatus.Ready)
+            {
+                try
+                {
+                    await Task.Run(() => AudioDefaultRestoration.RestoreIfPending(
+                        _virtualMicrophoneInstallation.PackageDirectory, _virtualMicrophoneStatus.DeviceIds));
+                }
+                catch (Exception exception)
+                {
+                    if (!_audioDefaultRestoreWarningShown)
+                    {
+                        _audioDefaultRestoreWarningShown = true;
+                        _log.Error("[vb-cable] 无法恢复安装前的默认音频设备。", exception);
+                        if (!_voiceCueWindowClosed) MessageBox.Show(this, T("Voice.Mic.RestoreDefaultsFailed"), T("Voice.Cues.Title"), MessageBoxButton.OK, MessageBoxImage.Warning);
+                    }
+                }
+            }
+            if (!_voiceCueWindowClosed) UpdateVirtualMicrophoneUi();
+        }
+        finally { _virtualMicrophoneChecking = false; }
+    }
+
+    private async void RefreshVoiceCueDevicesButton_Click(object sender, RoutedEventArgs e) =>
+        await RefreshVirtualMicrophoneAsync(refreshPackage: true);
+
+    private void VoiceCuesEnabledCheckBox_Checked(object sender, RoutedEventArgs e)
+    {
+        _virtualMicrophoneStatus = VbCableDevice.Probe();
+        if (!_virtualMicrophoneStatus.Ready) VoiceCuesEnabledCheckBox.IsChecked = false;
+        UpdateVirtualMicrophoneUi();
+    }
+
+    private async void InstallVirtualMicrophoneButton_Click(object sender, RoutedEventArgs e) => await ChangeVirtualMicrophoneInstallationAsync(install: true);
+    private async void UninstallVirtualMicrophoneButton_Click(object sender, RoutedEventArgs e) => await ChangeVirtualMicrophoneInstallationAsync(install: false);
+
+    private async void DownloadVbCableButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_virtualMicrophoneBusy || _vbCableDownloadCancellation is not null) return;
+        using var cancellation = new CancellationTokenSource();
+        _vbCableDownloadCancellation = cancellation;
+        VbCableDownloadPanel.Visibility = Visibility.Visible;
+        CancelVbCableDownloadButton.Visibility = Visibility.Visible;
+        VbCableDownloadProgressBar.Value = 0;
+        VbCableDownloadStatusText.Text = T("Voice.Mic.Downloading");
+        UpdateVirtualMicrophoneUi();
+        var progress = new Progress<VbCableDownloadProgress>(value =>
+        {
+            if (_voiceCueWindowClosed || _vbCableDownloadCancellation != cancellation) return;
+            VbCableDownloadProgressBar.Value = 100.0 * value.BytesDownloaded / Math.Max(1, value.TotalBytes);
+            VbCableDownloadStatusText.Text = value.Verifying ? T("Voice.Mic.Verifying") :
+                AppLocalization.Format("Voice.Mic.DownloadProgress", value.BytesDownloaded / 1024.0 / 1024.0, value.TotalBytes / 1024.0 / 1024.0);
+        });
+        try
+        {
+            await _virtualMicrophoneInstallation.DownloadAsync(progress, cancellation.Token);
+            VbCableDownloadProgressBar.Value = 100;
+            VbCableDownloadStatusText.Text = T("Voice.Mic.DownloadComplete");
+            _log.Info("[vb-cable] 官方安装包已下载并通过 SHA-256 校验。");
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            VbCableDownloadStatusText.Text = T("Download.Cancelled");
+        }
+        catch (Exception exception)
+        {
+            _log.Error("[vb-cable] 下载失败。", exception);
+            VbCableDownloadStatusText.Text = T("Voice.Mic.DownloadFailed");
+            if (!_voiceCueWindowClosed) MessageBox.Show(this, exception.Message, T("Dialog.DownloadFailed"), MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            _vbCableDownloadCancellation = null;
+            CancelVbCableDownloadButton.Visibility = Visibility.Collapsed;
+            if (!_voiceCueWindowClosed) await RefreshVirtualMicrophoneAsync(refreshPackage: true);
+        }
+    }
+
+    private void CancelVbCableDownloadButton_Click(object sender, RoutedEventArgs e) => _vbCableDownloadCancellation?.Cancel();
+
+    private void VbCableWebsiteButton_Click(object sender, RoutedEventArgs e) =>
+        Process.Start(new ProcessStartInfo(VbCableInstallation.WebsiteUrl) { UseShellExecute = true });
+
+    private void VbCableLicenseButton_Click(object sender, RoutedEventArgs e) =>
+        Process.Start(new ProcessStartInfo(VbCableInstallation.LicenseUrl) { UseShellExecute = true });
+
+    private async Task ChangeVirtualMicrophoneInstallationAsync(bool install)
+    {
+        if (_virtualMicrophoneBusy || _vbCableDownloadCancellation is not null || _runtime is not null || _startingRuntime || _stoppingRuntime) return;
+        _virtualMicrophoneBusy = true;
+        _voiceCuePreviewCancellation?.Cancel();
+        VoiceCuesEnabledCheckBox.IsChecked = false;
+        _configuration.VrChatVoiceInput.Cues.Enabled = false;
+        SaveConfigurationSafely("虚拟麦克风安装状态");
+        StartButton.IsEnabled = false;
+        UpdateVirtualMicrophoneUi();
+        try
+        {
+            _log.Info(install ? "[vb-cable] 正在启动官方安装程序。" : "[vb-cable] 正在启动官方卸载程序。");
+            await _virtualMicrophoneInstallation.RunAsync(install);
+            _log.Info("[vb-cable] 安装程序已退出，设备状态将在刷新后确认。官方要求安装/卸载后重启 Windows。");
+            MessageBox.Show(this, T("Voice.Mic.Reboot"), T("Voice.Cues.Title"), MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Win32Exception exception) when (exception.NativeErrorCode == 1223)
+        {
+            _log.Info("[virtual-mic] 用户取消了管理员授权。");
+        }
+        catch (Exception exception)
+        {
+            _log.Error("[virtual-mic] 安装或卸载失败。", exception);
+            MessageBox.Show(this, AppLocalization.Format("Voice.Mic.Failed", exception.Message), T("Voice.Cues.Title"), MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            _virtualMicrophoneBusy = false;
+            StartButton.IsEnabled = true;
+            await RefreshVirtualMicrophoneAsync(refreshPackage: true);
+        }
+    }
+
+    private VoiceInputCueConfiguration ReadVoiceCueControls(bool preview = false, bool requireCable = true)
+    {
+        var enabled = preview || VoiceCuesEnabledCheckBox.IsChecked == true;
+        if (enabled && requireCable)
+        {
+            _virtualMicrophoneStatus = VbCableDevice.Probe();
+            LogVirtualMicrophoneStatus(_virtualMicrophoneStatus, force: preview);
+            if (!_virtualMicrophoneStatus.Ready)
+            {
+                UpdateVirtualMicrophoneUi();
+                throw new InvalidOperationException(T("Voice.Cues.Validation.Device"));
+            }
+        }
+        return new VoiceInputCueConfiguration
+        {
+            Enabled = enabled,
+            EchoEnabled = VoiceCueEchoCheckBox.IsChecked == true,
+            StartEnabled = VoiceCueStartCheckBox.IsChecked == true,
+            OngoingEnabled = VoiceCueOngoingCheckBox.IsChecked == true,
+            EndEnabled = VoiceCueEndCheckBox.IsChecked == true,
+            StartFilePath = VoiceCueStartFileText.Tag as string,
+            OngoingFilePath = VoiceCueOngoingFileText.Tag as string,
+            EndFilePath = VoiceCueEndFileText.Tag as string,
+            VolumePercent = (int)VoiceCueVolumeSlider.Value
+        };
+    }
+
+    private async void PreviewVoiceCuesButton_Click(object sender, RoutedEventArgs e) => await PreviewVoiceCuesAsync(local: true);
+
+    private void SetVoiceCueFile(TextBlock field, string? path)
+    {
+        field.Tag = string.IsNullOrWhiteSpace(path) ? null : path;
+        var builtIn = T(ReferenceEquals(field, VoiceCueOngoingFileText)
+            ? "Voice.Cues.File.BuiltIn.Static" : "Voice.Cues.File.BuiltIn.Chime");
+        field.Text = field.Tag is string file ? Path.GetFileName(file) : builtIn;
+        field.ToolTip = field.Tag ?? builtIn;
+    }
+
+    private TextBlock VoiceCueFileField(object sender) => (((Button)sender).Tag as string) switch
+    {
+        "Start" => VoiceCueStartFileText,
+        "Ongoing" => VoiceCueOngoingFileText,
+        "End" => VoiceCueEndFileText,
+        _ => throw new ArgumentException("Unknown cue stage.")
+    };
+
+    private async void ChooseVoiceCueFileButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!VoiceCueFilesGrid.IsEnabled) return;
+        var field = VoiceCueFileField(sender);
+        var dialog = new OpenFileDialog
+        {
+            Title = T("Voice.Cues.File.Choose"),
+            Filter = T("Voice.Cues.File.Filter"),
+            CheckFileExists = true,
+            Multiselect = false
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        _voiceCueImportBusy = true;
+        StartButton.IsEnabled = false;
+        UpdateVirtualMicrophoneUi();
+        try
+        {
+            var path = await Task.Run(() => VoiceInputCueAudio.Import(dialog.FileName));
+            SetVoiceCueFile(field, path);
+            _log.Info($"[voice-cues] 已导入自定义音效：{path}");
+        }
+        catch (Exception exception)
+        {
+            _log.Error("[voice-cues] 导入自定义音效失败。", exception);
+            MessageBox.Show(this, exception.Message, T("Voice.Cues.Title"), MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            _voiceCueImportBusy = false;
+            StartButton.IsEnabled = true;
+            UpdateVirtualMicrophoneUi();
+        }
+    }
+
+    private void ResetVoiceCueFileButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (VoiceCueFilesGrid.IsEnabled) SetVoiceCueFile(VoiceCueFileField(sender), null);
+    }
+
+    private async void TestVoiceCuesButton_Click(object sender, RoutedEventArgs e) => await PreviewVoiceCuesAsync(local: false);
+
+    private async Task PreviewVoiceCuesAsync(bool local)
+    {
+        if (_voiceCuePreviewCancellation is not null)
+        {
+            _voiceCuePreviewCancellation.Cancel();
+            return;
+        }
+
+        using var cancellation = new CancellationTokenSource();
+        _voiceCuePreviewCancellation = cancellation;
+        _voiceCuePreviewIsLocal = local;
+        UpdateVirtualMicrophoneUi();
+        try
+        {
+            var configuration = ReadVoiceCueControls(preview: true, requireCable: !local);
+            string deviceId;
+            if (local)
+            {
+                using var enumerator = new MMDeviceEnumerator();
+                using var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                deviceId = device.ID;
+                if (_virtualMicrophoneStatus.DeviceIds.Contains(deviceId, StringComparer.OrdinalIgnoreCase))
+                    throw new InvalidOperationException(T("Voice.Cues.Preview.DefaultIsCable"));
+                PreviewVoiceCuesButton.Content = T("Voice.Cues.Preview.Stop");
+                _log.Info($"[voice-cues] 本机试听开始：设备={device.FriendlyName}；ID={deviceId}");
+            }
+            else
+            {
+                deviceId = _virtualMicrophoneStatus.PlaybackDeviceId!;
+                TestVoiceCuesButton.Content = T("Voice.Cues.Test.Stop");
+                _log.Info($"[voice-cues] 游戏麦克风测试开始：VB-CABLE ID={deviceId}；本机回响={configuration.EchoEnabled}。");
+            }
+            await VoiceInputCuePreview.PlayAsync(configuration, deviceId, cancellation.Token,
+                echoOptions: local ? null : new VoiceInputCueEchoOptions(_log, _virtualMicrophoneStatus.DeviceIds));
+            _log.Info(local ? "[voice-cues] 本机试听播放完成。" : "[voice-cues] VB-CABLE 测试播放完成；游戏接收情况需在游戏中确认。");
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            _log.Error("[voice-cues] 提示音测试失败。", exception);
+            if (!_voiceCueWindowClosed) MessageBox.Show(this, exception.Message, T("Voice.Cues.Title"), MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            _voiceCuePreviewCancellation = null;
+            _voiceCuePreviewIsLocal = false;
+            PreviewVoiceCuesButton.Content = T("Voice.Cues.Preview");
+            TestVoiceCuesButton.Content = T("Voice.Cues.Test");
+            if (!_voiceCueWindowClosed) UpdateVirtualMicrophoneUi();
+        }
+    }
+
     private void PopulateAsrEngines()
     {
         List<AsrEngineOption> options = [AsrEngineOption.Cpu];
@@ -3047,6 +3411,7 @@ public partial class MainWindow : Window
             VrChatVoiceInput = new VrChatVoiceInputConfiguration
             {
                 Enabled = configuration.VrChatVoiceInput.Enabled,
+                Cues = configuration.VrChatVoiceInput.Cues.Clone(),
                 DesktopHotKeyEnabled = configuration.VrChatVoiceInput.DesktopHotKeyEnabled,
                 DesktopHotKeyVirtualKey =
                     configuration.VrChatVoiceInput.DesktopHotKeyVirtualKey,

@@ -8,6 +8,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using SteamVRTranslator.App.Configuration;
 using SteamVRTranslator.App.Localization;
+using SteamVRTranslator.App.Output;
 using Xunit;
 
 namespace SteamVRTranslator.App.Tests;
@@ -57,6 +58,11 @@ public sealed class MainWindowVisualLayoutTests
             4,
             "SubtitlePromptAdvancedExpander"),
         new("voice", "VoiceNavButton"),
+        new("voice-cues", "VoiceNavButton", ScrollTarget: "VoiceCueSection"),
+        new("voice-cues-files", "VoiceNavButton", ScrollTarget: "VoiceCueFilesGrid"),
+        new("voice-cues-custom", "VoiceNavButton", ScrollTarget: "PreviewVoiceCuesButton"),
+        new("voice-cues-downloading", "VoiceNavButton", ScrollTarget: "VoiceCueSection", CablePackage: VbCablePackageState.Missing),
+        new("voice-cues-downloaded", "VoiceNavButton", ScrollTarget: "VoiceCueSection", CablePackage: VbCablePackageState.Ready),
         new("subtitles", "SubtitlesNavButton"),
         new(
             "subtitles-vibevoice",
@@ -210,6 +216,32 @@ public sealed class MainWindowVisualLayoutTests
     {
         var button = Assert.IsType<Button>(window.FindName(view.NavigationButton));
         button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        if (view.NavigationButton == "VoiceNavButton")
+        {
+            window.VoicePage.ScrollToTop();
+            foreach (var field in new[] { window.VoiceCueStartFileText, window.VoiceCueOngoingFileText, window.VoiceCueEndFileText })
+                field.Tag = view.Name == "voice-cues-custom"
+                    ? "sounds/voice-cues/example/自定义提示音_Custom_radio_transmission_long_file_name.wav" : null;
+            window.VbCableDownloadPanel.Visibility = view.CablePackage.HasValue ? Visibility.Visible : Visibility.Collapsed;
+            typeof(MainWindow).GetField("_virtualMicrophonePackageState", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(window, view.CablePackage ?? VbCablePackageState.Missing);
+            typeof(MainWindow).GetMethod("UpdateVirtualMicrophoneUi", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(window, null);
+            if (view.CablePackage.HasValue)
+            {
+                var completed = view.CablePackage == VbCablePackageState.Ready;
+                window.VbCableDownloadProgressBar.Value = completed ? 100 : 35;
+                window.VbCableDownloadStatusText.Text = completed ? AppLocalization.Text("Voice.Mic.DownloadComplete") :
+                    AppLocalization.Format("Voice.Mic.DownloadProgress", 0.44, 1.26);
+                window.CancelVbCableDownloadButton.Visibility = completed ? Visibility.Collapsed : Visibility.Visible;
+                if (!completed)
+                {
+                    window.DownloadVbCableButton.IsEnabled = false;
+                    window.InstallVirtualMicrophoneButton.IsEnabled = false;
+                    window.UninstallVirtualMicrophoneButton.IsEnabled = false;
+                }
+            }
+        }
         if (view.PromptTab is int tab)
         {
             window.PromptTabControl.SelectedIndex = tab;
@@ -245,6 +277,11 @@ public sealed class MainWindowVisualLayoutTests
         if (advancedExpander is not null)
         {
             advancedExpander.BringIntoView();
+            PumpLayout(window);
+        }
+        if (view.ScrollTarget is not null)
+        {
+            Assert.IsAssignableFrom<FrameworkElement>(window.FindName(view.ScrollTarget)).BringIntoView();
             PumpLayout(window);
         }
     }
@@ -475,7 +512,9 @@ public sealed class MainWindowVisualLayoutTests
         int? PromptTab = null,
         string? PromptAdvancedExpander = null,
         string? SubtitleBackend = null,
-        string? ProviderType = null);
+        string? ProviderType = null,
+        string? ScrollTarget = null,
+        VbCablePackageState? CablePackage = null);
 
     private sealed record WindowSize(string Name, double Width, double Height);
 

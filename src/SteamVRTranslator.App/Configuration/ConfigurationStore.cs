@@ -398,6 +398,8 @@ public sealed class ConfigurationStore
         configuration.Speech.EffectiveRecognitionLanguage = SpeechRecognitionLanguages.Resolve(
             configuration.Speech.RecognitionLanguage,
             configuration.UiLanguage);
+        configuration.VrChatVoiceInput.Cues ??= new VoiceInputCueConfiguration();
+        configuration.VrChatVoiceInput.Cues.Normalize();
         configuration.VrChatVoiceInput.StreamingChunkIntervalMilliseconds = Math.Clamp(
             configuration.VrChatVoiceInput.StreamingChunkIntervalMilliseconds,
             VrChatVoiceInputConfiguration.MinimumStreamingChunkIntervalMilliseconds,
