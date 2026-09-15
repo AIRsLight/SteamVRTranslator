@@ -323,6 +323,7 @@ public sealed class ConfigurationStore
 
     internal static void NormalizePrompts(AppConfiguration configuration)
     {
+        configuration.OverlayAppearance = (configuration.OverlayAppearance ?? new()).Normalized();
         configuration.UiLanguage = ApplicationLanguages.Normalize(configuration.UiLanguage);
         configuration.Prompts ??= BuiltInPromptDefaults.CreateAll();
         var normalizedPrompts = new Dictionary<string, LocalizedPromptConfiguration>(

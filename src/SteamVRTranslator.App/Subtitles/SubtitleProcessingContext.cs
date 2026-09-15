@@ -8,9 +8,11 @@ namespace SteamVRTranslator.App.Subtitles;
 /// <summary>Recognition resources used serially by one live session or file replay.</summary>
 internal sealed class SubtitleProcessingContext(
     Func<SpeechConfiguration, CancellationToken, ISubtitleLocalTranscriber> createLocal, AppLog log,
-    SubtitleAudioProcessor audioProcessor) : IAsyncDisposable
+    SubtitleAudioProcessor audioProcessor, string kind = "live") : IAsyncDisposable
 {
+    public SubtitleTrace Trace { get; } = new(log, kind);
     private string? _engineKey;
+    private string? _settingsSummary;
     private SubtitleDiarizationModelCache.Lease? _diarization;
     public AppConfiguration Configuration { get; private set; } = new();
     public ISubtitleLocalTranscriber? Local { get; private set; }
@@ -27,7 +29,14 @@ internal sealed class SubtitleProcessingContext(
                 ? null : SenseVoiceModelKey.From(configuration.Speech), configuration.Subtitles.AsrBackend,
             configuration.Subtitles.VibeVoiceServiceUrl, configuration.Subtitles.VibeVoiceApiKey
         });
-        if (!string.Equals(key, _engineKey, StringComparison.Ordinal))
+        var recognitionChanged = !string.Equals(key, _engineKey, StringComparison.Ordinal);
+        var summary = $"backend={configuration.Subtitles.AsrBackend} diarization={configuration.Subtitles.Diarization.Enabled} translate={configuration.Subtitles.TranslateText} showOriginal={configuration.Subtitles.ShowOriginalText} targetLanguage={JsonSerializer.Serialize(configuration.Subtitles.TargetLanguage)}";
+        if (recognitionChanged || summary != _settingsSummary)
+        {
+            Trace.Info($"stage=configuration status=apply {summary} recognitionChanged={recognitionChanged}");
+            _settingsSummary = summary;
+        }
+        if (recognitionChanged)
         {
             await DisposeRecognitionAsync().ConfigureAwait(false);
             _engineKey = key;
@@ -44,15 +53,24 @@ internal sealed class SubtitleProcessingContext(
         if (_diarization?.Key != diarizationKey)
         {
             var old = _diarization; _diarization = null;
-            if (old is not null) await old.DisposeAsync().ConfigureAwait(false);
+            if (old is not null)
+                await SubtitleTrace.MeasureAsync(log, Trace.Tag, "diarization-release", () => old.DisposeAsync().AsTask()).ConfigureAwait(false);
         }
-        if (diarizationKey is not null)
-            _diarization ??= await audioProcessor.AcquireModelsAsync(diarization, token).ConfigureAwait(false);
+        if (diarizationKey is not null && _diarization is null)
+            _diarization = await SubtitleTrace.MeasureAsync(log, Trace.Tag, "diarization-acquire",
+                () => audioProcessor.AcquireModelsAsync(diarization, token)).ConfigureAwait(false);
         if (Configuration.Subtitles.AsrBackend == SubtitleAsrBackends.VibeVoiceApi)
-            Api ??= new VibeVoiceApiTranscriber(Configuration.Subtitles, log);
+        {
+            if (Api is null)
+            {
+                Api = new VibeVoiceApiTranscriber(Configuration.Subtitles, log);
+                Trace.Info("stage=asr-acquire status=complete backend=VibeVoiceApi");
+            }
+        }
         else if (Local is null)
         {
-            Local = await Task.Run(() => createLocal(Configuration.Speech, token), token).ConfigureAwait(false);
+            Local = await SubtitleTrace.MeasureAsync(log, Trace.Tag, "asr-acquire",
+                () => Task.Run(() => createLocal(Configuration.Speech, token), token)).ConfigureAwait(false);
             token.ThrowIfCancellationRequested();
         }
     }
@@ -67,8 +85,10 @@ internal sealed class SubtitleProcessingContext(
         }
     }
 
-    public Task<SubtitleAudioDocument> AnalyzeAudioAsync(string path, CancellationToken token) =>
-        audioProcessor.AnalyzeAsync(path, Configuration.Subtitles.Diarization, Speakers, _diarization, token);
+    public Task<SubtitleAudioDocument> AnalyzeAudioAsync(string path, CancellationToken token, string? tag = null) =>
+        SubtitleTrace.MeasureAsync(log, tag ?? Trace.Tag, "audio-analyze",
+            () => audioProcessor.AnalyzeAsync(path, Configuration.Subtitles.Diarization, Speakers, _diarization, token, tag ?? Trace.Tag),
+            document => $"diarization={Configuration.Subtitles.Diarization.Enabled} parts={document.Segments.Count} durationMs={document.Samples.Length * 1000d / SubtitleAudioProcessor.SampleRate:F0}");
 
     private async ValueTask DisposeRecognitionAsync()
     {

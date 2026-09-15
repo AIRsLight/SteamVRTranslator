@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.IO;
+using System.Net;
 using System.Net.Http;
+using System.Text.RegularExpressions;
 using NAudio.Wave;
 using SteamVRTranslator.App.Configuration;
 using SteamVRTranslator.App.Diagnostics;
@@ -12,6 +14,138 @@ namespace SteamVRTranslator.App.Tests;
 
 public sealed class SubtitleLifecycleTests
 {
+    [Fact]
+    public async Task DetailedLogsCorrelateAudioThroughTranslationAndHistoryWithoutSpeechOrKeys()
+    {
+        await using var fixture = new Fixture();
+        fixture.Configuration.Subtitles.TranslateText = true;
+        fixture.Configuration.Translation.Providers[0].ApiKey = "secret-translation-key";
+        fixture.Configuration.Subtitles.VibeVoiceApiKey = "secret-asr-key";
+        fixture.Controller.ApplyConfiguration(fixture.Configuration);
+        await fixture.StartAsync();
+        fixture.Captures[0].Emit();
+        await Eventually(() => fixture.Logs.Any(line => line.Contains("stage=segment-process status=complete")));
+        await fixture.Controller.StopListeningAsync();
+        var lines = fixture.Logs.ToArray();
+        var session = SessionTag(Assert.Single(lines, line => line.Contains("stage=session status=start")));
+        foreach (var marker in new[] { "stage=queue status=enqueue", "stage=queue status=dequeue", "stage=audio-read status=complete",
+            "stage=audio-analyze status=complete", "stage=asr status=complete", "stage=history-add status=complete",
+            "stage=translation-slot status=complete", "stage=translation-request status=complete", "stage=history-translation status=complete",
+            "stage=translation status=complete", "stage=segment-process status=complete" })
+        {
+            var line = Assert.Single(lines, line => line.Contains(marker));
+            Assert.Contains(session, line);
+            Assert.Contains("[segment=000001]", line);
+        }
+        Assert.All(lines, line =>
+        {
+            Assert.DoesNotContain("test speech", line);
+            Assert.DoesNotContain("secret-translation-key", line);
+            Assert.DoesNotContain("secret-asr-key", line);
+        });
+        Assert.Contains(lines, line => line.Contains($"entry={fixture.Controller.History.Entries[0].Id}") && line.Contains("stage=history-translation status=complete"));
+        Assert.Contains(lines, line => line.Contains("received=1 processed=1 dropped=0 abandoned=0 canceled=0 failed=0"));
+    }
+
+    [Fact]
+    public async Task QueueOverflowAndStopAccountForEverySegment()
+    {
+        await using var fixture = new Fixture();
+        fixture.CreateLocal = (_, _) => new Transcriber { OnTranscribe = token => Task.Delay(Timeout.Infinite, token) };
+        await fixture.StartAsync();
+        fixture.Captures[0].Emit();
+        await fixture.Transcribers[0].Requested.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        for (var index = 0; index < 6; index++) fixture.Captures[0].Emit();
+        await fixture.Controller.StopListeningAsync();
+        var dropped = fixture.Logs.Where(line => line.Contains("stage=queue status=dropped")).ToArray();
+        Assert.Equal(2, dropped.Length);
+        Assert.Contains("[segment=000002]", dropped[0]);
+        Assert.Contains("[segment=000003]", dropped[1]);
+        Assert.Equal(4, fixture.Logs.Count(line => line.Contains("stage=queue status=abandoned")));
+        Assert.Contains(fixture.Logs, line => line.Contains("[segment=000001]") && line.Contains("stage=asr status=canceled"));
+        Assert.Contains(fixture.Logs, line => line.Contains("received=7 processed=0 dropped=2 abandoned=4 canceled=1 failed=0"));
+        Assert.Empty(fixture.Controller.History.Entries);
+    }
+
+    [Fact]
+    public async Task ReconnectionKeepsSessionButRestartAndReplayGetIndependentIdentifiers()
+    {
+        await using var fixture = new Fixture();
+        await fixture.StartAsync();
+        fixture.Captures[0].Fail();
+        await Eventually(() => fixture.Captures.Count == 2 && fixture.Controller.ListeningState == SubtitleListeningState.Listening);
+        var path = Path.Combine(fixture.DirectoryPath, "replay.wav");
+        using (var writer = new WaveFileWriter(path, new WaveFormat(16000, 16, 1))) writer.Write(new byte[16000], 0, 16000);
+        await fixture.Controller.ReplayFileAsync(path, null, CancellationToken.None);
+        await fixture.Controller.StopListeningAsync();
+        await fixture.StartAsync();
+        var sessions = fixture.Logs.Where(line => line.Contains("stage=session status=start")).Select(SessionTag).ToArray();
+        Assert.Equal(2, sessions.Distinct().Count());
+        Assert.Contains(fixture.Logs, line => line.Contains(sessions[0]) && line.Contains("[capture=2]") && line.Contains("stage=capture-connect status=complete"));
+        var replay = SessionTag(Assert.Single(fixture.Logs, line => line.Contains("stage=replay status=start")));
+        Assert.DoesNotContain(replay, sessions);
+        Assert.Contains(fixture.Logs, line => line.Contains(replay) && line.Contains("stage=history-add status=complete"));
+    }
+
+    [Fact]
+    public async Task TranslationFailureHasATerminalLogAndClearsTheHistorySpinner()
+    {
+        await using var fixture = new Fixture();
+        fixture.Configuration.Subtitles.TranslateText = true;
+        fixture.Configuration.Translation.Providers.Clear();
+        fixture.Controller.ApplyConfiguration(fixture.Configuration);
+        await fixture.StartAsync();
+        fixture.Captures[0].Emit();
+        await Eventually(() => fixture.Logs.Any(line => line.Contains("stage=segment-process status=complete")));
+        var entry = Assert.Single(fixture.Controller.History.Entries);
+        Assert.False(entry.IsTranslating);
+        Assert.False(string.IsNullOrWhiteSpace(entry.Error));
+        Assert.Contains(fixture.Logs, line => line.Contains("[segment=000001]") && line.Contains("stage=translation status=failed"));
+        Assert.Contains(fixture.Logs, line => line.Contains("stage=history-translation-finish status=complete"));
+        Assert.True(fixture.Controller.IsListening);
+    }
+
+    [Fact]
+    public async Task WaitingForAProcessLogsOnlyStateChanges()
+    {
+        await using var fixture = new Fixture();
+        var polls = 0;
+        await fixture.Controller.StartListeningAsync(() => { Interlocked.Increment(ref polls); return 0; });
+        await Eventually(() => Volatile.Read(ref polls) >= 6);
+        Assert.Single(fixture.Logs, line => line.Contains("to=WaitingForProcess"));
+        Assert.Empty(fixture.Captures);
+    }
+
+    private static string SessionTag(string line) => Regex.Match(line, @"\[session=[^\]]+\]").Value;
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task EmptyOrCanceledTranslationIsDistinguishedFromSuccess(bool cancel)
+    {
+        var handler = new ControlledTranslationHandler(cancel);
+        await using var fixture = new Fixture(handler);
+        fixture.Configuration.Subtitles.TranslateText = true;
+        fixture.Configuration.Translation.ActiveProviderId = "test";
+        fixture.Configuration.Translation.Providers = [new TranslationProviderConfiguration
+        {
+            Id = "test", Model = "test-model", BaseUrl = "https://translation.invalid/v1", ApiKey = "private-test-key"
+        }];
+        fixture.Controller.ApplyConfiguration(fixture.Configuration);
+        await fixture.StartAsync();
+        fixture.Captures[0].Emit();
+        await handler.Requested.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        if (cancel) await fixture.Controller.StopListeningAsync().WaitAsync(TimeSpan.FromSeconds(3));
+        else await Eventually(() => fixture.Logs.Any(line => line.Contains("stage=segment-process status=complete")));
+        var entry = Assert.Single(fixture.Controller.History.Entries);
+        Assert.False(entry.IsTranslating);
+        Assert.Empty(entry.TranslatedText);
+        if (!cancel) Assert.False(string.IsNullOrWhiteSpace(entry.Error));
+        Assert.Contains(fixture.Logs, line => line.Contains("[segment=000001]") && line.Contains($"stage=translation status={(cancel ? "canceled" : "empty")}"));
+        Assert.Contains(fixture.Logs, line => line.Contains($"stage=translation-request status={(cancel ? "canceled" : "complete")}"));
+        Assert.DoesNotContain(fixture.Logs, line => line.Contains("stage=translation status=complete") || line.Contains("private-test-key"));
+    }
+
     [Fact]
     public async Task StopDuringActivationWaitsForCleanupAndSerializesRestart()
     {
@@ -225,15 +359,19 @@ public sealed class SubtitleLifecycleTests
         public IReadOnlyList<Capture> Captures => _captures.ToArray();
         public IReadOnlyList<Transcriber> Transcribers => _transcribers.ToArray();
         public ConcurrentQueue<SubtitleListeningStateChangedEventArgs> States { get; } = new();
+        public ConcurrentQueue<string> Logs { get; } = new();
         public Func<uint, Capture> CreateCapture { get; set; } = _ => new Capture();
         public Func<SpeechConfiguration, CancellationToken, Transcriber> CreateLocal { get; set; } = (_, _) => new Transcriber();
-        private readonly HttpClient _http = new();
+        private readonly HttpClient _http;
         public SubtitleSessionController Controller { get; }
-        public Fixture()
+        public Fixture(HttpMessageHandler? handler = null)
         {
+            _http = handler is null ? new HttpClient() : new HttpClient(handler);
             Configuration.Subtitles.TranslateText = false;
             Configuration.Subtitles.Diarization.Enabled = false;
-            Controller = new SubtitleSessionController(Configuration, new AppLog(DirectoryPath), _http, id =>
+            var log = new AppLog(DirectoryPath);
+            log.MessageWritten += (_, line) => Logs.Enqueue(line);
+            Controller = new SubtitleSessionController(Configuration, log, _http, id =>
             {
                 var capture = CreateCapture(id); _captures.Enqueue(capture); return capture;
             }, (speech, token) =>
@@ -267,6 +405,20 @@ public sealed class SubtitleLifecycleTests
         public void Emit() => SegmentReady?.Invoke(this,
             new ProcessLoopbackAudioSegment(new byte[16000], new WaveFormat(16000, 16, 1), TimeSpan.Zero, TimeSpan.FromSeconds(0.5)));
         public ValueTask DisposeAsync() { Disposed = true; DisposeCount++; _completion.TrySetResult(); return ValueTask.CompletedTask; }
+    }
+
+    private sealed class ControlledTranslationHandler(bool waitForCancellation) : HttpMessageHandler
+    {
+        public TaskCompletionSource Requested { get; } = NewSignal();
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+        {
+            Requested.TrySetResult();
+            if (waitForCancellation) await Task.Delay(Timeout.Infinite, token);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"choices\":[{\"message\":{\"content\":\"\"}}]}")
+            };
+        }
     }
 
     private sealed class Transcriber : ISubtitleLocalTranscriber

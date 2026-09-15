@@ -72,11 +72,12 @@ public sealed class SubtitleSessionController : IAsyncDisposable
     public async Task StartListeningAsync(Func<uint> currentSceneProcessId, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(currentSceneProcessId);
+        _log.Info("[subtitles] command=start-listening status=requested");
         await _lifecycle.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (IsListening) return;
+            if (IsListening) { _log.Info("[subtitles] command=start-listening status=ignored reason=already-active"); return; }
             if (!_isSupported()) throw new PlatformNotSupportedException("进程音频字幕需要 Windows 10 build 20348 或更高版本。");
             if (_live is not null) await _live.DisposeAsync().ConfigureAwait(false);
             var context = new SubtitleProcessingContext(_createLocal, _log, _audioProcessor);
@@ -85,10 +86,10 @@ public sealed class SubtitleSessionController : IAsyncDisposable
                 token => PrepareAsync(context, token),
                 (segment, token) => ProcessSegmentAsync(context, segment, token),
                 SetListeningState, _log, linked.Token, _pollInterval,
-                async () => { try { await context.DisposeAsync().ConfigureAwait(false); } finally { linked.Dispose(); } });
+                async () => { try { await context.DisposeAsync().ConfigureAwait(false); } finally { linked.Dispose(); } }, context.Trace);
             _live.Start();
-            _log.Info("[subtitles] 实时字幕会话启动中。准备识别引擎后连接场景进程。");
         }
+        catch (Exception exception) { _log.Error("[subtitles] command=start-listening status=failed", exception); throw; }
         finally { _lifecycle.Release(); }
     }
 
@@ -109,11 +110,13 @@ public sealed class SubtitleSessionController : IAsyncDisposable
 
     public async Task StopAllAsync()
     {
+        _log.Info("[subtitles] command=stop-all status=requested");
         Task? replay;
         lock (_sync) { _replayCancellation?.Cancel(); replay = _replayFinished?.Task; }
         await StopListeningAsync().ConfigureAwait(false);
         if (replay is not null) await replay.ConfigureAwait(false);
         await _audioProcessor.ReleaseIdleModelsAsync().ConfigureAwait(false);
+        _log.Info("[subtitles] command=stop-all status=complete");
     }
 
     public async Task<SubtitleReplayResult> ReplayFileAsync(string audioPath, IProgress<double>? progress, CancellationToken cancellationToken)
@@ -132,13 +135,20 @@ public sealed class SubtitleSessionController : IAsyncDisposable
         {
             return await Task.Run(async () =>
             {
-                await using var context = new SubtitleProcessingContext(_createLocal, _log, _audioProcessor);
-                try
+                var context = new SubtitleProcessingContext(_createLocal, _log, _audioProcessor, "replay");
+                return await SubtitleTrace.MeasureAsync(_log, context.Trace.Tag, "replay", async () =>
                 {
-                    await PrepareAsync(context, cancellation.Token).ConfigureAwait(false);
-                    return await ReplayFileCoreAsync(context, audioPath, progress, cancellation.Token).ConfigureAwait(false);
-                }
-                finally { await Task.WhenAll(context.Translations).ConfigureAwait(false); }
+                    try
+                    {
+                        await PrepareAsync(context, cancellation.Token).ConfigureAwait(false);
+                        return await ReplayFileCoreAsync(context, audioPath, progress, cancellation.Token).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        try { await Task.WhenAll(context.Translations).ConfigureAwait(false); }
+                        finally { await SubtitleTrace.MeasureAsync(_log, context.Trace.Tag, "cleanup", () => context.DisposeAsync().AsTask()).ConfigureAwait(false); }
+                    }
+                }).ConfigureAwait(false);
             }).ConfigureAwait(false);
         }
         finally
@@ -182,15 +192,16 @@ public sealed class SubtitleSessionController : IAsyncDisposable
             path = ApplicationDataPaths.CreateTemporaryFilePath("subtitle-live", ".wav");
             using (var writer = new WaveFileWriter(path, queued.Segment.Format))
                 writer.Write(queued.Segment.PcmBytes, 0, queued.Segment.PcmBytes.Length);
+            _log.Info($"{queued.Tag} stage=audio-file status=complete bytes={queued.Segment.PcmBytes.Length} sampleRate={queued.Segment.Format.SampleRate} channels={queued.Segment.Format.Channels}");
             await ProcessLiveFileAsync(context, path, queued, token).ConfigureAwait(false);
         }
-        catch (NoSpeechRecognizedException) { _log.Info("[subtitles] 当前音频分段未检测到语音。继续监听。"); }
+        catch (NoSpeechRecognizedException) { _log.Info($"{queued.Tag} 当前音频分段未检测到语音。继续监听。"); }
         finally
         {
             if (path is not null)
             {
                 try { File.Delete(path); }
-                catch (IOException exception) { _log.Warning($"[subtitles] 清理临时音频失败：{exception.Message}"); }
+                catch (IOException exception) { _log.Warning($"{queued.Tag} 清理临时音频失败：{exception.Message}"); }
             }
         }
     }
@@ -238,7 +249,7 @@ public sealed class SubtitleSessionController : IAsyncDisposable
         CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
-        _log.Info($"[subtitles] 文件重放开始：{audioPath}");
+        context.Trace.Info($"stage=replay-file bytes={new FileInfo(audioPath).Length} backend={context.Configuration.Subtitles.AsrBackend}");
         if (string.Equals(
                 context.Configuration.Subtitles.AsrBackend,
                 SubtitleAsrBackends.VibeVoiceApi,
@@ -260,41 +271,42 @@ public sealed class SubtitleSessionController : IAsyncDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
             var segment = document.Segments[index];
+            var tag = $"{context.Trace.Tag} [segment={index + 1:D6}]";
             var path = SubtitleAudioProcessor.WriteSegmentToTemporaryWave(document, segment);
             using var audio = new CommandAudioInput(
                 path,
                 TimeSpan.FromSeconds(segment.EndSeconds - segment.StartSeconds));
             try
             {
-                var transcription = await transcriber.TranscribeAsync(
-                    audio,
-                    $"[subtitles:{index + 1}/{document.Segments.Count}]",
-                    cancellationToken);
+                var transcription = await TranscribeLocalAsync(transcriber, audio, tag, cancellationToken);
                 var sourceText = transcription.Text.Trim();
                 if (string.IsNullOrWhiteSpace(sourceText))
                 {
+                    _log.Info($"{tag} stage=history-add status=skipped reason=empty-asr");
                     continue;
                 }
 
                 recognized++;
-                var entry = await OnUiAsync(() => History.Add(
+                var entry = await AddHistoryEntryAsync(context, tag,
                     segment.Speaker,
                     TimeSpan.FromSeconds(segment.StartSeconds),
                     TimeSpan.FromSeconds(segment.EndSeconds),
-                    context.Configuration.Subtitles.ShowOriginalText ? sourceText : string.Empty), cancellationToken).ConfigureAwait(false);
+                    sourceText, cancellationToken).ConfigureAwait(false);
                 if (context.Configuration.Subtitles.TranslateText)
                 {
-                    translationTasks.Add(TranslateEntryAsync(context, entry, sourceText, cancellationToken));
+                    translationTasks.Add(TranslateEntryAsync(context, entry, sourceText, tag, cancellationToken));
                 }
                 else
                 {
                     await OnUiAsync(() => entry.IsTranslating = false, CancellationToken.None).ConfigureAwait(false);
+                    _log.Info($"{tag} stage=translation status=skipped reason=disabled entry={entry.Id}");
                 }
             }
+            catch (NoSpeechRecognizedException) { }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 _log.Error(
-                    $"[subtitles] 分段 {index + 1}/{document.Segments.Count} 识别失败。",
+                    $"{tag} 分段 {index + 1}/{document.Segments.Count} 识别失败。",
                     exception);
             }
 
@@ -304,7 +316,7 @@ public sealed class SubtitleSessionController : IAsyncDisposable
         await Task.WhenAll(translationTasks);
         stopwatch.Stop();
         _log.Info(
-            $"[subtitles] 文件重放完成：总耗时={stopwatch.Elapsed.TotalSeconds:F2}s，" +
+            $"{context.Trace.Tag} 文件重放完成：总耗时={stopwatch.Elapsed.TotalSeconds:F2}s，" +
             $"分段={document.Segments.Count}，有效字幕={recognized}。");
         return new SubtitleReplayResult(document.Segments.Count, recognized, stopwatch.Elapsed);
     }
@@ -322,11 +334,12 @@ public sealed class SubtitleSessionController : IAsyncDisposable
                 StringComparison.OrdinalIgnoreCase))
         {
             var transcriber = context.Api!;
-            var result = await transcriber.TranscribeAsync(
+            var result = await SubtitleTrace.MeasureAsync(_log, queued.Tag, "asr", () => transcriber.TranscribeAsync(
                 audioPath,
                 context.Configuration.Speech.EffectiveRecognitionLanguage,
-                "[subtitles:live:vibevoice]",
-                cancellationToken);
+                queued.Tag,
+                cancellationToken), result => $"parts={result.Segments.Count} chars={result.Segments.Sum(part => part.Text.Length)}");
+            var part = 0;
             foreach (var segment in result.Segments)
             {
                 await AddLiveEntryAsync(
@@ -335,30 +348,30 @@ public sealed class SubtitleSessionController : IAsyncDisposable
                     baseTime + queued.Segment.Start + TimeSpan.FromSeconds(segment.StartSeconds),
                     baseTime + queued.Segment.Start + TimeSpan.FromSeconds(segment.EndSeconds),
                     segment.Text,
+                    $"{queued.Tag} [part={++part}/{result.Segments.Count}]",
                     cancellationToken);
             }
             return;
         }
 
-        var document = await context.AnalyzeAudioAsync(audioPath, cancellationToken);
+        var document = await context.AnalyzeAudioAsync(audioPath, cancellationToken, queued.Tag);
         var transcriberLocal = context.Local!;
         for (var index = 0; index < document.Segments.Count; index++)
         {
             var segment = document.Segments[index];
+            var tag = $"{queued.Tag} [part={index + 1}/{document.Segments.Count}]";
             var path = SubtitleAudioProcessor.WriteSegmentToTemporaryWave(document, segment);
             using var audio = new CommandAudioInput(
                 path,
                 TimeSpan.FromSeconds(segment.EndSeconds - segment.StartSeconds));
-            var transcription = await transcriberLocal.TranscribeAsync(
-                audio,
-                $"[subtitles:live:{index + 1}/{document.Segments.Count}]",
-                cancellationToken);
+            var transcription = await TranscribeLocalAsync(transcriberLocal, audio, tag, cancellationToken);
             await AddLiveEntryAsync(
                 context,
                 segment.Speaker,
                 baseTime + queued.Segment.Start + TimeSpan.FromSeconds(segment.StartSeconds),
                 baseTime + queued.Segment.Start + TimeSpan.FromSeconds(segment.EndSeconds),
                 transcription.Text,
+                tag,
                 cancellationToken);
         }
     }
@@ -369,26 +382,29 @@ public sealed class SubtitleSessionController : IAsyncDisposable
         TimeSpan start,
         TimeSpan end,
         string text,
+        string tag,
         CancellationToken cancellationToken)
     {
         var sourceText = text.Trim();
         if (string.IsNullOrWhiteSpace(sourceText))
         {
+            _log.Info($"{tag} stage=history-add status=skipped reason=empty-asr");
             return;
         }
 
-        var entry = await OnUiAsync(() => History.Add(
+        var entry = await AddHistoryEntryAsync(context, tag,
             speaker,
             start,
             end < start ? start : end,
-            context.Configuration.Subtitles.ShowOriginalText ? sourceText : string.Empty), cancellationToken).ConfigureAwait(false);
+            sourceText, cancellationToken).ConfigureAwait(false);
         if (context.Configuration.Subtitles.TranslateText)
         {
-            await TranslateEntryAsync(context, entry, sourceText, cancellationToken);
+            await TranslateEntryAsync(context, entry, sourceText, tag, cancellationToken);
         }
         else
         {
             await OnUiAsync(() => entry.IsTranslating = false, CancellationToken.None).ConfigureAwait(false);
+            _log.Info($"{tag} stage=translation status=skipped reason=disabled entry={entry.Id}");
         }
     }
 
@@ -401,35 +417,39 @@ public sealed class SubtitleSessionController : IAsyncDisposable
     {
         context.ApiSpeakers.Clear();
         var transcriber = context.Api!;
-        var result = await transcriber.TranscribeAsync(
+        var result = await SubtitleTrace.MeasureAsync(_log, context.Trace.Tag, "asr", () => transcriber.TranscribeAsync(
             audioPath,
             context.Configuration.Speech.EffectiveRecognitionLanguage,
-            "[subtitles:vibevoice]",
-            cancellationToken);
+            context.Trace.Tag,
+            cancellationToken), result => $"parts={result.Segments.Count} chars={result.Segments.Sum(part => part.Text.Length)}");
         var translationTasks = context.Translations;
         var recognized = 0;
+        var number = 0;
         foreach (var segment in result.Segments)
         {
+            var tag = $"{context.Trace.Tag} [segment={++number:D6}]";
             cancellationToken.ThrowIfCancellationRequested();
             var sourceText = segment.Text.Trim();
             if (string.IsNullOrWhiteSpace(sourceText))
             {
+                _log.Info($"{tag} stage=history-add status=skipped reason=empty-asr");
                 continue;
             }
 
             recognized++;
-            var entry = await OnUiAsync(() => History.Add(
+            var entry = await AddHistoryEntryAsync(context, tag,
                 VibeVoiceSpeakerId(context, segment.Speaker),
                 TimeSpan.FromSeconds(segment.StartSeconds),
                 TimeSpan.FromSeconds(Math.Max(segment.StartSeconds, segment.EndSeconds)),
-                context.Configuration.Subtitles.ShowOriginalText ? sourceText : string.Empty), cancellationToken).ConfigureAwait(false);
+                sourceText, cancellationToken).ConfigureAwait(false);
             if (context.Configuration.Subtitles.TranslateText)
             {
-                translationTasks.Add(TranslateEntryAsync(context, entry, sourceText, cancellationToken));
+                translationTasks.Add(TranslateEntryAsync(context, entry, sourceText, tag, cancellationToken));
             }
             else
             {
                 await OnUiAsync(() => entry.IsTranslating = false, CancellationToken.None).ConfigureAwait(false);
+                _log.Info($"{tag} stage=translation status=skipped reason=disabled entry={entry.Id}");
             }
         }
 
@@ -437,7 +457,7 @@ public sealed class SubtitleSessionController : IAsyncDisposable
         await Task.WhenAll(translationTasks);
         stopwatch.Stop();
         _log.Info(
-            $"[subtitles] VibeVoice 文件重放完成：总耗时={stopwatch.Elapsed.TotalSeconds:F2}s，" +
+            $"{context.Trace.Tag} VibeVoice 文件重放完成：总耗时={stopwatch.Elapsed.TotalSeconds:F2}s，" +
             $"说话人={context.ApiSpeakers.Count}，有效字幕={recognized}。");
         return new SubtitleReplayResult(result.Segments.Count, recognized, stopwatch.Elapsed);
     }
@@ -459,46 +479,77 @@ public sealed class SubtitleSessionController : IAsyncDisposable
         SubtitleProcessingContext context,
         SubtitleHistoryEntry entry,
         string sourceText,
+        string tag,
         CancellationToken cancellationToken)
     {
+        tag = $"{tag} [entry={entry.Id}]";
+        var timer = Stopwatch.StartNew();
+        _log.Info($"{tag} stage=translation status=start sourceChars={sourceText.Length}");
         try
         {
             var provider = context.Configuration.Translation.GetProviderFor(
                     PromptProviderPurpose.SubtitleTranslation)
                 ?? throw new InvalidOperationException("字幕翻译没有可用的模型提供商。");
-            using var lease = await _providerConcurrency.AcquireAsync(
+            _log.Info($"{tag} stage=translation-provider provider={JsonSerializer.Serialize(provider.Id)} model={JsonSerializer.Serialize(provider.Model)} maxConcurrency={provider.MaxConcurrency}");
+            using var lease = await SubtitleTrace.MeasureAsync(_log, tag, "translation-slot", () => _providerConcurrency.AcquireAsync(
                 provider.Id,
                 provider.MaxConcurrency,
-                cancellationToken);
+                cancellationToken));
             var backend = TranslationBackendFactory.Create(
                 context.Configuration.Translation,
                 provider,
                 _httpClient,
                 textTranslationPurpose: PromptProviderPurpose.SubtitleTranslation);
-            var translated = await backend.TranslateTextAsync(
+            var translated = await SubtitleTrace.MeasureAsync(_log, tag, "translation-request", () => backend.TranslateTextAsync(
                 sourceText,
                 context.Configuration.Subtitles.TargetLanguage,
                 context.Configuration.Subtitles.TranslationSystemPrompt,
                 context.Configuration.Subtitles.TranslationPrompt,
                 onPartialResult: null,
-                cancellationToken);
-            await OnUiAsync(() =>
+                cancellationToken), text => $"chars={text?.Trim().Length ?? 0}");
+            await SubtitleTrace.MeasureAsync(_log, tag, "history-translation", () => OnUiAsync(() =>
             {
                 entry.TranslatedText = translated?.Trim() ?? string.Empty;
                 if (string.IsNullOrWhiteSpace(entry.TranslatedText)) entry.Error = "翻译模型没有返回文本。";
                 return true;
-            }, cancellationToken).ConfigureAwait(false);
+            }, cancellationToken)).ConfigureAwait(false);
+            _log.Info($"{tag} stage=translation status={(string.IsNullOrWhiteSpace(translated) ? "empty" : "complete")} elapsedMs={timer.Elapsed.TotalMilliseconds:F0} chars={translated?.Trim().Length ?? 0}");
+        }
+        catch (OperationCanceledException)
+        {
+            _log.Info($"{tag} stage=translation status=canceled elapsedMs={timer.Elapsed.TotalMilliseconds:F0}");
+            throw;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             await OnUiAsync(() => entry.Error = exception.Message, CancellationToken.None).ConfigureAwait(false);
-            _log.Error($"[subtitles] 字幕翻译失败：说话人={entry.DisplaySpeaker}。", exception);
+            _log.Error($"{tag} stage=translation status=failed elapsedMs={timer.Elapsed.TotalMilliseconds:F0} 字幕翻译失败。", exception);
         }
         finally
         {
-            await OnUiAsync(() => entry.IsTranslating = false, CancellationToken.None).ConfigureAwait(false);
+            await SubtitleTrace.MeasureAsync(_log, tag, "history-translation-finish",
+                () => OnUiAsync(() => entry.IsTranslating = false, CancellationToken.None)).ConfigureAwait(false);
         }
     }
+
+    private Task<CommandTranscriptionResult> TranscribeLocalAsync(ISubtitleLocalTranscriber transcriber,
+        CommandAudioInput audio, string tag, CancellationToken token)
+    {
+        _log.Info($"{tag} stage=asr-input durationMs={audio.Duration.TotalMilliseconds:F0}");
+        return SubtitleTrace.MeasureAsync(_log, tag, "asr", () => transcriber.TranscribeAsync(audio, tag, token),
+            result => $"chars={result.Text.Trim().Length} empty={string.IsNullOrWhiteSpace(result.Text)}");
+    }
+
+    private Task<SubtitleHistoryEntry> AddHistoryEntryAsync(SubtitleProcessingContext context, string tag,
+        int speaker, TimeSpan start, TimeSpan end, string sourceText, CancellationToken token) =>
+        SubtitleTrace.MeasureAsync(_log, tag, "history-add", () => OnUiAsync(() =>
+        {
+            var before = History.Entries.Count;
+            var entry = History.Add(speaker, start, end,
+                context.Configuration.Subtitles.ShowOriginalText ? sourceText : string.Empty);
+            _log.Info($"{tag} stage=history-state entry={entry.Id} speaker={speaker} startMs={start.TotalMilliseconds:F0} endMs={end.TotalMilliseconds:F0} sourceChars={sourceText.Length} showOriginal={context.Configuration.Subtitles.ShowOriginalText} translate={context.Configuration.Subtitles.TranslateText} entries={History.Entries.Count} trimmed={before + 1 - History.Entries.Count} retained={History.Entries.Contains(entry)}");
+            return entry;
+        }, token), entry => $"entry={entry.Id}");
 }
 
 public enum SubtitleListeningState
@@ -527,7 +578,9 @@ public sealed class SubtitleListeningStateChangedEventArgs(
 
 internal sealed record QueuedLiveSegment(
     ProcessLoopbackAudioSegment Segment,
-    TimeSpan BaseTime);
+    TimeSpan BaseTime,
+    string Tag = "[subtitles]",
+    long EnqueuedAt = 0);
 
 public sealed record SubtitleReplayResult(
     int SegmentCount,

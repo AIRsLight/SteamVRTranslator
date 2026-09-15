@@ -83,7 +83,6 @@ jobs:
           if (Test-Path -LiteralPath $notesSource) {
             $notesPath = Join-Path $env:RUNNER_TEMP "release-notes.md"
             $notes = (Get-Content -LiteralPath $notesSource -Raw).TrimEnd()
-            $notes += "`n`nBuild commit: $env:GITHUB_SHA`n"
             Set-Content -LiteralPath $notesPath -Value $notes -Encoding utf8
             $notesArguments = @("--notes-file", $notesPath)
           }

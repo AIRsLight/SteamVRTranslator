@@ -13,7 +13,7 @@ using SteamVRTranslator.Core.Selection;
 
 namespace SteamVRTranslator.App.SteamVR;
 
-internal sealed class OverlayRenderer
+internal sealed partial class OverlayRenderer
 {
     private static readonly byte[] UnpremultiplyLookup = CreateUnpremultiplyLookup();
     private const double ResultCornerRadius = 9;
@@ -45,6 +45,7 @@ internal sealed class OverlayRenderer
     private readonly ConditionalWeakTable<object, ResultControlSurfaceCache> _resultControls = new();
     private readonly Dictionary<bool, OverlayRenderFrame> _pointerFrames = [];
     private OverlayRenderFrame? _pointerRayFrame;
+    private long _themeRevision = -1;
     private static readonly Lazy<Dispatcher> FallbackDispatcher = new(CreateFallbackDispatcher);
 
     public byte[] RenderSelection(
@@ -152,8 +153,8 @@ internal sealed class OverlayRenderer
         using (var drawing = visual.RenderOpen())
         {
             var accent = !frameUsable && snapshot.Region is not null
-                ? Color.FromRgb(239, 68, 68)
-                : Color.FromRgb(46, 229, 140);
+                ? OverlayTheme.Resolve(OverlayColorRole.Danger, Color.FromRgb(239, 68, 68))
+                : OverlayTheme.Resolve(OverlayColorRole.Accent, Color.FromRgb(46, 229, 140));
             if (snapshot.Region is { } region)
             {
                 var rectangle = new Rect(
@@ -400,7 +401,7 @@ internal sealed class OverlayRenderer
         using (var drawing = visual.RenderOpen())
         {
             var line = new Pen(
-                new SolidColorBrush(Color.FromRgb(77, 224, 193)),
+                new SolidColorBrush(OverlayTheme.Resolve(OverlayColorRole.Accent, Color.FromRgb(77, 224, 193))),
                 2.5)
             {
                 StartLineCap = PenLineCap.Round,
@@ -534,7 +535,7 @@ internal sealed class OverlayRenderer
             {
                 Width = _width,
                 Height = _height,
-                Background = new SolidColorBrush(Color.FromArgb(225, 24, 31, 29)),
+                Background = new SolidColorBrush(OverlayTheme.Resolve(OverlayColorRole.Background, Color.FromArgb(225, 24, 31, 29))),
                 BorderThickness = new Thickness(0),
                 CornerRadius = new CornerRadius(ResultCornerRadius),
                 ClipToBounds = true
@@ -705,7 +706,7 @@ internal sealed class OverlayRenderer
             VerticalScrollBarVisibility = ScrollBarVisibility.Hidden,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             Background = Brushes.Transparent,
-            Foreground = new SolidColorBrush(Color.FromRgb(244, 248, 246)),
+            Foreground = new SolidColorBrush(OverlayTheme.Resolve(OverlayColorRole.Text, Color.FromRgb(244, 248, 246))),
             BorderThickness = new Thickness(0),
             Padding = new Thickness(14, 12, 10, 12),
             FontFamily = new FontFamily("Microsoft YaHei UI"),
@@ -727,15 +728,15 @@ internal sealed class OverlayRenderer
             _width = width;
             Root = new Grid
             {
-                Background = new SolidColorBrush(Color.FromRgb(24, 31, 29)),
+                Background = new SolidColorBrush(OverlayTheme.Resolve(OverlayColorRole.Background, Color.FromRgb(24, 31, 29))),
                 ClipToBounds = true
             };
             Root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             Root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             Root.Children.Add(new Border
             {
-                Background = new SolidColorBrush(Color.FromRgb(31, 40, 37)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(90, 108, 102)),
+                Background = new SolidColorBrush(OverlayTheme.Resolve(OverlayColorRole.Surface, Color.FromRgb(31, 40, 37))),
+                BorderBrush = new SolidColorBrush(OverlayTheme.Resolve(OverlayColorRole.Border, Color.FromRgb(90, 108, 102))),
                 BorderThickness = new Thickness(0, 0, 0, 1),
                 Padding = new Thickness(15, 11, 15, 10),
                 Child = new TextBlock
@@ -744,7 +745,7 @@ internal sealed class OverlayRenderer
                     FontFamily = new FontFamily("Microsoft YaHei UI"),
                     FontSize = 16,
                     FontWeight = FontWeights.SemiBold,
-                    Foreground = new SolidColorBrush(Color.FromRgb(246, 249, 248))
+                    Foreground = new SolidColorBrush(OverlayTheme.Resolve(OverlayColorRole.Text, Color.FromRgb(246, 249, 248)))
                 }
             });
 
@@ -854,16 +855,16 @@ internal sealed class OverlayRenderer
                 FontFamily = new FontFamily("Microsoft YaHei UI"),
                 FontSize = 16,
                 LineHeight = 23,
-                Foreground = new SolidColorBrush(Color.FromRgb(246, 249, 248))
+                Foreground = new SolidColorBrush(OverlayTheme.Resolve(OverlayColorRole.Text, Color.FromRgb(246, 249, 248)))
             };
             var bubble = new Border
             {
                 Background = new SolidColorBrush(descriptor.IsUser
-                    ? Color.FromRgb(30, 79, 70)
-                    : Color.FromRgb(39, 48, 45)),
+                    ? OverlayTheme.Resolve(OverlayColorRole.AccentSoft, Color.FromRgb(30, 79, 70))
+                    : OverlayTheme.Resolve(OverlayColorRole.Surface, Color.FromRgb(39, 48, 45))),
                 BorderBrush = new SolidColorBrush(descriptor.IsUser
-                    ? Color.FromRgb(77, 224, 193)
-                    : Color.FromRgb(101, 117, 111)),
+                    ? OverlayTheme.Resolve(OverlayColorRole.Accent, Color.FromRgb(77, 224, 193))
+                    : OverlayTheme.Resolve(OverlayColorRole.Border, Color.FromRgb(101, 117, 111))),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(8),
                 Padding = new Thickness(11, 8, 11, 9),
@@ -882,7 +883,7 @@ internal sealed class OverlayRenderer
                 Text = descriptor.Role,
                 FontFamily = new FontFamily("Microsoft YaHei UI"),
                 FontSize = 10,
-                Foreground = new SolidColorBrush(Color.FromRgb(188, 201, 196)),
+                Foreground = new SolidColorBrush(OverlayTheme.Resolve(OverlayColorRole.MutedText, Color.FromRgb(188, 201, 196))),
                 HorizontalAlignment = descriptor.IsUser
                     ? HorizontalAlignment.Right
                     : HorizontalAlignment.Left,
@@ -991,18 +992,18 @@ internal sealed class OverlayRenderer
     {
         var bounds = new Rect(86, 222, 340, 68);
         drawing.DrawRoundedRectangle(
-            new SolidColorBrush(Color.FromArgb(224, 42, 45, 48)),
-            new Pen(new SolidColorBrush(Color.FromArgb(235, 238, 241, 243)), 1.5),
+            new SolidColorBrush(OverlayTheme.Resolve(OverlayColorRole.Background, Color.FromArgb(224, 42, 45, 48))),
+            new Pen(new SolidColorBrush(OverlayTheme.Resolve(OverlayColorRole.Border, Color.FromArgb(235, 238, 241, 243))), 1.5),
             bounds,
             6,
             6);
-        var text = Text(AppLocalization.Text("Overlay.Selection.Armed"), 19, Colors.White, bounds.Width - 24);
+        var text = Text(AppLocalization.Text("Overlay.Selection.Armed"), 19, OverlayTheme.Resolve(OverlayColorRole.Text, Colors.White), bounds.Width - 24);
         text.TextAlignment = TextAlignment.Center;
         drawing.DrawText(text, new Point(bounds.Left + 12, bounds.Top + 20));
     }
 
     private static Pen? InteractionPen(bool highlighted) => highlighted
-        ? new Pen(new SolidColorBrush(Color.FromArgb(255, 46, 229, 140)), 1.25)
+        ? new Pen(new SolidColorBrush(OverlayTheme.Resolve(OverlayColorRole.Accent, Color.FromArgb(255, 46, 229, 140))), 1.25)
         : null;
 
     private void DrawToolbar(
@@ -1091,9 +1092,9 @@ internal sealed class OverlayRenderer
         double progress)
     {
         var radius = (size / 2) - 5;
-        var background = new SolidColorBrush(Color.FromArgb(205, 38, 41, 44));
-        var trackPen = new Pen(new SolidColorBrush(Color.FromArgb(125, 255, 255, 255)), 3);
-        var progressPen = new Pen(new SolidColorBrush(Color.FromRgb(239, 68, 68)), 4)
+        var background = new SolidColorBrush(OverlayTheme.Resolve(OverlayColorRole.Background, Color.FromArgb(205, 38, 41, 44)));
+        var trackPen = new Pen(new SolidColorBrush(OverlayTheme.Resolve(OverlayColorRole.Text, Color.FromArgb(125, 255, 255, 255))), 3);
+        var progressPen = new Pen(new SolidColorBrush(OverlayTheme.Resolve(OverlayColorRole.Danger, Color.FromRgb(239, 68, 68))), 4)
         {
             StartLineCap = PenLineCap.Round,
             EndLineCap = PenLineCap.Round
@@ -1115,7 +1116,7 @@ internal sealed class OverlayRenderer
             center.X - (iconSize / 2),
             center.Y - (iconSize / 2)));
         drawing.PushTransform(new ScaleTransform(iconSize / 24, iconSize / 24));
-        drawing.DrawGeometry(Brushes.White, null, MaterialIconPaths.DeleteOutline);
+        drawing.DrawGeometry(OverlayTheme.Brush(OverlayColorRole.Text, "#FFFFFF"), null, MaterialIconPaths.DeleteOutline);
         drawing.Pop();
         drawing.Pop();
     }
@@ -1167,16 +1168,16 @@ internal sealed class OverlayRenderer
         var center = new Point(
             value.TexturePoint.X * logicalSize.Width,
             value.TexturePoint.Y * logicalSize.Height);
-        var outer = new Pen(new SolidColorBrush(Color.FromArgb(235, 35, 39, 42)), 5);
-        var inner = new Pen(Brushes.White, value.IsPressed ? 4 : 2.5);
+        var outer = new Pen(new SolidColorBrush(OverlayTheme.Resolve(OverlayColorRole.Background, Color.FromArgb(235, 35, 39, 42))), 5);
+        var inner = new Pen(OverlayTheme.Brush(OverlayColorRole.Text, "#FFFFFF"), value.IsPressed ? 4 : 2.5);
         drawing.DrawEllipse(
-            value.IsPressed ? new SolidColorBrush(Color.FromArgb(150, 255, 255, 255)) : null,
+            value.IsPressed ? new SolidColorBrush(OverlayTheme.Resolve(OverlayColorRole.Text, Color.FromArgb(150, 255, 255, 255))) : null,
             outer,
             center,
             11,
             11);
         drawing.DrawEllipse(null, inner, center, 8, 8);
-        drawing.DrawEllipse(Brushes.White, null, center, 2.2, 2.2);
+        drawing.DrawEllipse(OverlayTheme.Brush(OverlayColorRole.Text, "#FFFFFF"), null, center, 2.2, 2.2);
     }
 
     internal static Rect CalculateResultPanel(SpatialSelectionPlane plane)
@@ -1289,7 +1290,7 @@ internal sealed class OverlayRenderer
             return;
         }
 
-        var background = new SolidColorBrush(Color.FromArgb(220, 38, 41, 44));
+        var background = new SolidColorBrush(OverlayTheme.Resolve(OverlayColorRole.Background, Color.FromArgb(220, 38, 41, 44)));
         var border = new Pen(new SolidColorBrush(Color.FromArgb(235, accent.R, accent.G, accent.B)), 1.5);
         drawing.DrawRoundedRectangle(background, border, bounds, 6, 6);
 
@@ -1299,7 +1300,7 @@ internal sealed class OverlayRenderer
             >= 190 => 13,
             _ => 11
         };
-        var formatted = Text(hint, fontSize, Colors.White, Math.Max(1, bounds.Width - 14));
+        var formatted = Text(hint, fontSize, OverlayTheme.Resolve(OverlayColorRole.Text, Colors.White), Math.Max(1, bounds.Width - 14));
         formatted.TextAlignment = TextAlignment.Center;
         formatted.MaxTextHeight = Math.Max(1, bounds.Height - 6);
         var y = bounds.Top + Math.Max(2, (bounds.Height - formatted.Height) / 2);
@@ -1431,19 +1432,33 @@ internal sealed class OverlayRenderer
         return lookup;
     }
 
-    private static T OnUiThread<T>(Func<T> action)
+    private T OnUiThread<T>(Func<T> action)
     {
+        T Render()
+        {
+            var revision = OverlayTheme.Instance.Revision;
+            if (_themeRevision != revision)
+            {
+                _toolbars.Clear();
+                _voiceButtons.Clear();
+                _resultControls.Clear();
+                _pointerFrames.Clear();
+                _pointerRayFrame = null;
+                _themeRevision = revision;
+            }
+            return action();
+        }
         var application = Application.Current;
         if (application is not null)
         {
             return application.Dispatcher.CheckAccess()
-                ? action()
-                : application.Dispatcher.Invoke(action);
+                ? Render()
+                : application.Dispatcher.Invoke(Render);
         }
 
         return Thread.CurrentThread.GetApartmentState() == ApartmentState.STA
-            ? action()
-            : FallbackDispatcher.Value.Invoke(action);
+            ? Render()
+            : FallbackDispatcher.Value.Invoke(Render);
     }
 
     private static Dispatcher CreateFallbackDispatcher()

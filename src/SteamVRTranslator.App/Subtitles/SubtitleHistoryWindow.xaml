@@ -8,7 +8,7 @@
         Width="720" Height="480" MinWidth="520" MinHeight="360"
         WindowStartupLocation="CenterOwner"
         WindowStyle="None" AllowsTransparency="True"
-        Background="Transparent" Foreground="#F4F8F6"
+        Background="Transparent" Foreground="{steamvr:OverlayBrush Role=Text, Classic=#F4F8F6}"
         FontFamily="Segoe UI Variable, Segoe UI">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
@@ -16,8 +16,8 @@
             <Setter Property="Width" Value="44" />
             <Setter Property="Height" Value="44" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="#F4F8F6" />
-            <Setter Property="BorderBrush" Value="#70FFFFFF" />
+            <Setter Property="Foreground" Value="{steamvr:OverlayBrush Role=Text, Classic=#F4F8F6}" />
+            <Setter Property="BorderBrush" Value="{steamvr:OverlayBrush Role=Border, Classic=#70FFFFFF}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
@@ -31,15 +31,15 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="steamvr:VrPointerHover.IsHovered" Value="True">
-                                <Setter TargetName="Shell" Property="Background" Value="#304DE0C1" />
-                                <Setter TargetName="Shell" Property="BorderBrush" Value="#FF4DE0C1" />
+                                <Setter TargetName="Shell" Property="Background" Value="{steamvr:OverlayBrush Role=Accent, Classic=#304DE0C1}" />
+                                <Setter TargetName="Shell" Property="BorderBrush" Value="{steamvr:OverlayBrush Role=Accent, Classic=#FF4DE0C1}" />
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Shell" Property="Background" Value="#304DE0C1" />
-                                <Setter TargetName="Shell" Property="BorderBrush" Value="#FF4DE0C1" />
+                                <Setter TargetName="Shell" Property="Background" Value="{steamvr:OverlayBrush Role=Accent, Classic=#304DE0C1}" />
+                                <Setter TargetName="Shell" Property="BorderBrush" Value="{steamvr:OverlayBrush Role=Accent, Classic=#FF4DE0C1}" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Shell" Property="Background" Value="#604DE0C1" />
+                                <Setter TargetName="Shell" Property="Background" Value="{steamvr:OverlayBrush Role=Accent, Classic=#604DE0C1}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -48,14 +48,14 @@
         </Style>
     </Window.Resources>
 
-    <Border x:Name="WindowFrame" Background="#E118201D" BorderBrush="Transparent"
+    <Border x:Name="WindowFrame" Background="{steamvr:OverlayBrush Role=Background, Classic=#E118201D}" BorderBrush="Transparent"
             BorderThickness="2" CornerRadius="20" ClipToBounds="True">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="66" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
-            <Border Background="#B81F2926" BorderBrush="#55FFFFFF"
+            <Border Background="{steamvr:OverlayBrush Role=Surface, Classic=#B81F2926}" BorderBrush="{steamvr:OverlayBrush Role=Border, Classic=#55FFFFFF}"
                     BorderThickness="0,0,0,1" Padding="18,0">
                 <Grid>
                     <Grid.ColumnDefinitions>
@@ -66,9 +66,9 @@
                     </Grid.ColumnDefinitions>
                     <StackPanel VerticalAlignment="Center">
                         <TextBlock Text="{loc:Loc Key=Subtitle.Window.Title}" FontSize="16"
-                                   FontWeight="SemiBold" Foreground="#F7FAF9" />
+                                   FontWeight="SemiBold" Foreground="{steamvr:OverlayBrush Role=Text, Classic=#F7FAF9}" />
                         <TextBlock Text="{loc:Loc Key=Subtitle.Window.Experimental}" FontSize="10"
-                                   Foreground="#B8C8C2" Margin="0,2,0,0" />
+                                   Foreground="{steamvr:OverlayBrush Role=MutedText, Classic=#B8C8C2}" Margin="0,2,0,0" />
                     </StackPanel>
                     <Button x:Name="ListenButton" Grid.Column="1" Style="{StaticResource ToolbarButton}"
                             Width="144" Margin="0,0,12,0" Click="ListenButton_Click"
@@ -113,7 +113,7 @@
                 </ListBox.ItemContainerStyle>
                 <ListBox.ItemTemplate>
                     <DataTemplate>
-                        <Border Background="#A6293430" BorderBrush="#55FFFFFF"
+                        <Border Background="{steamvr:OverlayBrush Role=Surface, Classic=#A6293430}" BorderBrush="{steamvr:OverlayBrush Role=Border, Classic=#55FFFFFF}"
                                 BorderThickness="1" CornerRadius="9">
                             <Grid>
                                 <Grid.ColumnDefinitions>
@@ -128,16 +128,16 @@
                                         <TextBlock Text="{Binding DisplaySpeaker}" FontSize="11"
                                                    FontWeight="SemiBold" Foreground="{Binding SpeakerBrush}" Margin="3,0,0,0" />
                                         <TextBlock Text="{Binding TimeRange}" FontSize="10"
-                                                   Foreground="#AFC1BA" Margin="10,1,0,0" />
+                                                   Foreground="{steamvr:OverlayBrush Role=MutedText, Classic=#AFC1BA}" Margin="10,1,0,0" />
                                     </StackPanel>
-                                    <TextBlock Text="{Binding SourceText}" FontSize="13" Foreground="#C7D5D0"
+                                    <TextBlock Text="{Binding SourceText}" FontSize="13" Foreground="{steamvr:OverlayBrush Role=MutedText, Classic=#C7D5D0}"
                                                TextWrapping="Wrap" Margin="0,7,0,0" />
-                                    <TextBlock Text="{Binding TranslatedText}" FontSize="16" Foreground="#FFFFFF"
+                                    <TextBlock Text="{Binding TranslatedText}" FontSize="16" Foreground="{steamvr:OverlayBrush Role=Text, Classic=#FFFFFF}"
                                                TextWrapping="Wrap" Margin="0,7,0,0" />
                                     <TextBlock Text="{loc:Loc Key=Subtitle.Window.Translating}" FontSize="11"
-                                               Foreground="#AFC1BA" Margin="0,7,0,0"
+                                               Foreground="{steamvr:OverlayBrush Role=MutedText, Classic=#AFC1BA}" Margin="0,7,0,0"
                                                Visibility="{Binding IsTranslating, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                    <TextBlock Text="{Binding Error}" FontSize="11" Foreground="#FF8B8B"
+                                    <TextBlock Text="{Binding Error}" FontSize="11" Foreground="{steamvr:OverlayBrush Role=Danger, Classic=#FF8B8B}"
                                                TextWrapping="Wrap" Margin="0,7,0,0" />
                                 </StackPanel>
                             </Grid>

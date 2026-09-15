@@ -41,9 +41,66 @@ Pyannote 分段和 ERes2Net 声纹模型独立于 SenseVoice，由字幕控制�
 
 Windows 进程音频捕获需要 build 20348 或更新版本。日志会记录捕获 PID、音频格式、连接失败及重试、识别启动和识别异常。
 
+## 详细流程日志
+
+详细日志默认启用，写入程序目录的 `logs/steamvr-translator-yyyyMMdd.log`，不需要开启调试选项。实时监听和文件重放均有独立的 `[session=live-…]` / `[session=replay-…]`；重连音频会增加 `[capture=…]`，开始新会话才更换 session。实时音频段使用会话内递增的 `[segment=000001]`，说话人分段增加 `[part=1/2]`，字幕历史记录使用 `[entry=…]`。
+
+日志中的 `stage` 表示处理阶段，`status` 表示开始、完成、取消、跳过或失败；`elapsedMs` 是阶段耗时，`waitMs` 是队列等待耗时。新增流程元数据记录字符数，不主动输出识别原文、译文、API 密钥或完整配置；原有异常记录仍保留错误详情和调用栈。
+
+| 阶段 | 可诊断的信息 |
+| --- | --- |
+| `state`、`asr-acquire`、`diarization-acquire` | 等待场景进程、准备共享 ASR、获取字幕常驻说话人模型及取消/失败 |
+| `capture-connect`、`audio-activate`、`audio-initialize` | 当前捕获 PID、每次重连、Windows 音频接口激活和格式初始化 |
+| `audio` | 首包、累计包数/帧数、Windows 静音标志、超过成段音量阈值的包数、音频不连续、RMS/峰值及距上次收包的时间 |
+| `segment` | 成段起止时间、字节数、触发原因；不足 280 ms 的短段会记录丢弃原因 |
+| `queue` | 入队、出队、等待时间、剩余排队数量；队列容量 4，满时逐条记录被丢弃的最旧音频段 |
+| `audio-file`、`audio-read`、`audio-analyze` | 临时 WAV 写入、读取和转换为 16 kHz 单声道、分析后的分段数与时长 |
+| `diarization-segment`、`speaker-embedding` | 本地分段、声纹推理和共享模型等待；未启用时明确记录跳过 |
+| `asr`、`model-queue` | ASR 请求、共享 SenseVoice 队列优先级和等待、字符数、空结果、无语音、失败和取消 |
+| `translation-slot`、`translation-request`、`translation` | 翻译提供商/模型、并发槽等待、请求耗时、字符数、空响应、取消和失败；关闭翻译时明确记录跳过 |
+| `history-add`、`history-state`、`history-translation` | Dispatcher 上的字幕历史添加/译文更新、记录 ID、显示开关、历史数量与裁剪数量 |
+| `capture-dispose`、`cleanup`、`session` | 取消请求、资源释放、总耗时及各音频段去向汇总 |
+
+采集日志在首包到达时记录一次，此后每 5 秒输出一次状态，停止时输出最终统计。即使完全没有收到音频包也会每 5 秒记录。`packets`、`silentPackets`、`audiblePackets` 为累计数；`rms`、`peak` 是本次记录窗口的电平（0–1），`audiblePackets` 仅表示超过成段阈值，不代表模型判定有人声。RMS 阈值为 0.0025。
+
+实时成段原因：`ending-silence` 是累计静音达到约 650 ms；`packet-gap` 是目标停止提交音频包约 650 ms；`maximum-duration` 是达到 12 秒上限；`capture-stop` / `capture-failed` 是关闭或异常时排出尾段。停止后排出的尾段会标记为 `abandoned`，不会继续识别。
+
+正常链路示例（省略时间、会话和捕获前缀）：
+
+```text
+[segment=000001] stage=segment status=ready reason=ending-silence ...
+[segment=000001] stage=queue status=enqueue
+[segment=000001] stage=queue status=dequeue waitMs=2 pending=0
+[segment=000001] stage=audio-analyze status=complete ... parts=1 ...
+[segment=000001] [part=1/1] stage=asr status=complete ... chars=18 empty=False
+[segment=000001] [part=1/1] stage=history-add status=complete ... entry=...
+[segment=000001] [part=1/1] [entry=...] stage=translation status=complete ... chars=12
+[segment=000001] stage=segment-process status=complete ...
+```
+
+快速判断：
+
+- `packets=0` / `lastPacketAgoMs=none`：连接后没有收到目标进程音频。
+- 收到包但 `audiblePackets` 不增长：声音为静音或低于成段阈值；结合当前窗口 RMS/峰值判断。
+- 有段但迟迟未出队，或出现 `status=dropped reason=capacity`：处理跟不上音频速度。
+- 某阶段只有 `status=start`：执行或等待停留在该阶段；结合后续取消、失败和清理记录判断。
+- `asr status=complete` 且 `chars=0`，或 `status=no-speech`：模型未生成有效字幕。
+- `history-add status=complete`：历史数据已在 Dispatcher 上提交，**不等于已确认 VR 纹理或头显画面显示成功**。继续检查显示开关、历史裁剪和 Overlay 状态。
+- 共享 SenseVoice 的 `location=worker-selected` 取消后，底层可能继续读取原请求响应；`delivered=False` 表示旧响应已丢弃，没有提交给已取消的字幕请求。
+
+停止会话的汇总满足 `received = processed + dropped + abandoned + canceled + failed`。`processed` 表示该音频段处理结束，其中也可能包含无语音、零分段或翻译失败；具体结果需查看该段的阶段日志。
+
+排查时保留从点击“开始监听”到点击“停止监听”的完整日志，可按 `[subtitles]` 筛选，再用 session 和 segment 追踪。PowerShell 示例：
+
+```powershell
+Get-Content -LiteralPath '.\logs\steamvr-translator-20260914.log' | Select-String -SimpleMatch '[subtitles]'
+```
+
 ## 回归验证
 
 `SubtitleLifecycleTests` 使用可控音频源和识别实例复现：连接期间停止再启动、捕获断开重连、模型启动失败与取消、识别途中修改设置、识别失败、无语音、外部取消及文件重放隔离。
+
+详细日志回归额外验证：完整链路的编号关联、重连/重启/重放的编号隔离、队列溢出和停止时每个音频段的去向、翻译失败/空响应/取消、等待进程日志去重，以及正常流程不输出原文或密钥。`SubtitleAudioDiagnosticsTests` 验证无包与静音的区别、五秒限频、RMS/峰值窗口、音频异常标志和成段触发原因。
 
 `SubtitleWindowLifecycleTests` 在真实 WPF Dispatcher 上验证关闭窗口不会同步阻塞字幕清理，并检查错误与停止状态的按钮行为。`SenseVoiceRuntimeTests` 验证尚未 READY 的常驻进程能够取消并退出。
 

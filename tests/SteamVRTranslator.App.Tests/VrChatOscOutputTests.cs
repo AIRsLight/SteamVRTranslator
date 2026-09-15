@@ -1,4 +1,6 @@
 using System.Text;
+using System.Net;
+using System.Net.Sockets;
 using SteamVRTranslator.App.Configuration;
 using SteamVRTranslator.App.Output;
 using Xunit;
@@ -7,6 +9,49 @@ namespace SteamVRTranslator.App.Tests;
 
 public sealed class VrChatOscOutputTests
 {
+    [Fact]
+    public async Task EchoUsesTheExactChunksSentOverUdpIncludingPreviewAndTranslationTail()
+    {
+        using var receiver = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        using var output = new VrChatOscOutput(new VrChatVoiceInputConfiguration
+        {
+            Port = ((IPEndPoint)receiver.Client.LocalEndPoint!).Port,
+            MaxChatboxCharacters = 3, StreamingChunkIntervalMilliseconds = 0
+        });
+        var emissions = new List<OscChatboxEmission>();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await output.SendAsync("A😀BCDE", true, timeout.Token, emissions.Add);
+        await output.SendPreviewAsync("预览文本", timeout.Token, emissions.Add);
+        await output.UpdateSubmittedChatboxAsync("翻译后的文本", timeout.Token, emissions.Add);
+        Assert.Equal(["A😀B", "CDE", "预览文", "的文本"], emissions.Select(item => item.Text));
+        for (var index = 0; index < emissions.Count; index++)
+        {
+            var packet = await receiver.ReceiveAsync(timeout.Token);
+            Assert.Equal(OscChatboxMessage.Create(emissions[index].Text, emissions[index].SendImmediately,
+                emissions[index].IsUpdate ? false : null), packet.Buffer);
+        }
+        Assert.Equal(2, emissions[1].ChunkNumber);
+        Assert.Equal(2, emissions[1].ChunkCount);
+        Assert.False(emissions[2].SendImmediately);
+        Assert.True(emissions[3].IsUpdate);
+    }
+
+    [Fact]
+    public async Task CancelingBetweenChunksNeverEchoesUnsentText()
+    {
+        using var receiver = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        using var output = new VrChatOscOutput(new VrChatVoiceInputConfiguration
+        {
+            Port = ((IPEndPoint)receiver.Client.LocalEndPoint!).Port,
+            MaxChatboxCharacters = 3, StreamingChunkIntervalMilliseconds = 1000
+        });
+        using var cancellation = new CancellationTokenSource();
+        var emissions = new List<OscChatboxEmission>();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => output.SendAsync("abcdef", true, cancellation.Token,
+            emission => { emissions.Add(emission); cancellation.Cancel(); }));
+        Assert.Equal("abc", Assert.Single(emissions).Text);
+    }
+
     [Fact]
     public void ChatboxPacketPreservesUtf8TextAndPadding()
     {

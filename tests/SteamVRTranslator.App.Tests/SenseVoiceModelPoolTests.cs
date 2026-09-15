@@ -210,6 +210,8 @@ public sealed class SenseVoiceModelPoolTests
         Assert.Equal("voice result", (await next.WaitAsync(TimeSpan.FromSeconds(3))).Text);
         Assert.Single(fixture.Workers);
         Assert.False(File.Exists(fixture.Workers[0].Paths.First()));
+        Assert.Contains(fixture.Logs, line => line.Contains("stage=model-queue status=canceled location=worker-selected"));
+        Assert.Contains(fixture.Logs, line => line.Contains("delivered=False"));
     }
 
     [Fact]
@@ -232,6 +234,8 @@ public sealed class SenseVoiceModelPoolTests
         await active;
         await lease.DisposeAsync();
         Assert.Single(fixture.Workers[0].Inputs);
+        Assert.Contains(fixture.Logs, line => line.Contains("stage=model-queue status=canceled location=queued"));
+        Assert.Single(fixture.Logs, line => line.Contains("stage=model-queue status=dequeue waitMs="));
     }
 
     [Fact]
@@ -341,6 +345,7 @@ public sealed class SenseVoiceModelPoolTests
     {
         public string DirectoryPath { get; } = Path.Combine(Path.GetTempPath(), "sensevoice-pool-" + Guid.NewGuid().ToString("N"));
         public AppLog Log { get; }
+        public ConcurrentQueue<string> Logs { get; } = new();
         public SenseVoiceModelPool Pool { get; }
         public SpeechConfiguration Configuration { get; } = new();
         public Func<CancellationToken, Worker> Create { get; set; } = _ => new();
@@ -349,6 +354,7 @@ public sealed class SenseVoiceModelPoolTests
         public Fixture(TimeSpan? requestTimeout = null)
         {
             Log = new AppLog(DirectoryPath);
+            Log.MessageWritten += (_, line) => Logs.Enqueue(line);
             Pool = new((_, _, token) => { var worker = Create(token); _workers.Enqueue(worker); return worker; }, requestTimeout);
         }
         public Task<SenseVoiceModelPool.Lease> Acquire(CancellationToken token = default) => Pool.AcquireAsync(Configuration, Log, token);

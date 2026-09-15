@@ -55,6 +55,7 @@ internal partial class VrControlPanelWindow : Window,
         try
         {
             VoiceEnabledToggle.IsChecked = state.VoiceEnabled;
+            VoiceTextEchoToggle.IsChecked = state.TextEchoEnabled;
             TranslationEnabledToggle.IsChecked = state.TranslationEnabled;
             SendImmediatelyToggle.IsChecked = state.SendImmediately;
             PointerRayButton.IsChecked = state.PointerRayEnabled;
@@ -135,9 +136,11 @@ internal partial class VrControlPanelWindow : Window,
 
     public void SetInteractionHighlighted(bool highlighted)
     {
-        WindowFrame.BorderBrush = highlighted
-            ? new SolidColorBrush(Color.FromRgb(46, 229, 140))
-            : Brushes.Transparent;
+        if (highlighted)
+            WindowFrame.SetBinding(System.Windows.Controls.Border.BorderBrushProperty,
+                OverlayTheme.CreateBinding(OverlayColorRole.Accent, "#2EE58C"));
+        else
+            WindowFrame.BorderBrush = Brushes.Transparent;
         InvalidateOverlay();
     }
 
@@ -448,7 +451,8 @@ internal partial class VrControlPanelWindow : Window,
         _androidMirrorAvailable,
         PointerRayButton.IsChecked == true,
         _pointerSmoothingStrength,
-        _subtitleState);
+        _subtitleState,
+        VoiceTextEchoToggle.IsChecked == true);
 
     private void UpdateFeatureVisibility()
     {
@@ -476,6 +480,8 @@ internal partial class VrControlPanelWindow : Window,
         SettingsMenuButton.ToolTip = T("VrPanel.Settings");
         MirrorMenuButton.ToolTip = T("VrPanel.Mirror");
         VoiceEnabledToggle.ToolTip = T("Voice.Enable");
+        VoiceTextEchoToggle.ToolTip = T("Voice.Echo.Help");
+        VoiceTextEchoToggle.Content = T("Voice.Echo.Short");
         TranslationEnabledToggle.ToolTip = T("Voice.Translation.Enable");
         SendImmediatelyToggle.ToolTip = T("Voice.SendImmediately");
         TranslationOnlyButton.Content = T("VrPanel.TranslationShort");
@@ -730,7 +736,8 @@ public sealed record VrControlPanelState(
     bool AndroidMirrorAvailable = true,
     bool PointerRayEnabled = false,
     int PointerSmoothingStrength = AppConfiguration.DefaultPointerSmoothingStrength,
-    VrSubtitleControlState? Subtitles = null);
+    VrSubtitleControlState? Subtitles = null,
+    bool TextEchoEnabled = false);
 
 public sealed record VrSubtitleControlState(
     string AsrBackend,

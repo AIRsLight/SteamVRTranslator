@@ -215,6 +215,7 @@ internal sealed class SenseVoiceModelPool : IAsyncDisposable
                     _stop.Token.ThrowIfCancellationRequested();
                     request.Node = (priority == SenseVoiceRequestPriority.Interactive ? _interactive : _subtitles).AddLast(request);
                 }
+                _log.Info($"{tag} [asr] stage=model-queue status=enqueue priority={priority} pending={QueuedRequests}");
                 _available.Release();
             }
             catch { DeleteAudio(path); throw; }
@@ -225,6 +226,7 @@ internal sealed class SenseVoiceModelPool : IAsyncDisposable
         private void Cancel(Request request)
         {
             var queued = false;
+            bool canceled;
             lock (_sync)
             {
                 if (request.Node?.List is { } list)
@@ -233,8 +235,10 @@ internal sealed class SenseVoiceModelPool : IAsyncDisposable
                     request.Node = null;
                     queued = true;
                 }
-                request.Completion.TrySetCanceled(request.Token);
+                canceled = request.Completion.TrySetCanceled(request.Token);
             }
+            if (canceled)
+                _log.Info($"{request.Tag} [asr] stage=model-queue status=canceled location={(queued ? "queued" : "worker-selected")} elapsedMs={Stopwatch.GetElapsedTime(request.EnqueuedAt).TotalMilliseconds:F0}");
             if (queued) DeleteAudio(request.Path);
         }
 
@@ -290,6 +294,7 @@ internal sealed class SenseVoiceModelPool : IAsyncDisposable
 
         private async Task ProcessAsync(Request request)
         {
+            _log.Info($"{request.Tag} [asr] stage=model-queue status=dequeue waitMs={Stopwatch.GetElapsedTime(request.EnqueuedAt).TotalMilliseconds:F0}");
             using var operation = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
             var stopwatch = Stopwatch.StartNew();
             try
@@ -300,8 +305,8 @@ internal sealed class SenseVoiceModelPool : IAsyncDisposable
                 var text = await _worker.TranscribeAsync(request.Path, operation.Token).ConfigureAwait(false);
                 var diagnostics = _worker.TakeDiagnostics();
                 if (!string.IsNullOrWhiteSpace(diagnostics)) _log.Info($"{request.Tag} [asr] worker诊断：{diagnostics}");
-                request.Completion.TrySetResult(new(text, stopwatch.Elapsed));
-                _log.Info($"{request.Tag} [asr] 识别完成：耗时={stopwatch.Elapsed.TotalMilliseconds:F0} ms，字符={text.Length}。");
+                var delivered = request.Completion.TrySetResult(new(text, stopwatch.Elapsed));
+                _log.Info($"{request.Tag} [asr] 识别完成：耗时={stopwatch.Elapsed.TotalMilliseconds:F0} ms，字符={text.Length}。 delivered={delivered}");
             }
             catch (NoSpeechRecognizedException exception)
             {
@@ -352,6 +357,7 @@ internal sealed class SenseVoiceModelPool : IAsyncDisposable
 
         private sealed class Request(string path, string tag, TimeSpan duration, CancellationToken token)
         {
+            public long EnqueuedAt { get; } = Stopwatch.GetTimestamp();
             public string Path { get; } = path;
             public string Tag { get; } = tag;
             public TimeSpan Duration { get; } = duration;

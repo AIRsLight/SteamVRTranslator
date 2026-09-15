@@ -38,11 +38,11 @@ public sealed class SubtitleAudioProcessor : IAsyncDisposable
 
     internal async Task<SubtitleAudioDocument> AnalyzeAsync(
         string audioPath, SubtitleDiarizationConfiguration configuration, SpeakerIdentityRegistry speakerRegistry,
-        SubtitleDiarizationModelCache.Lease? lease, CancellationToken cancellationToken)
+        SubtitleDiarizationModelCache.Lease? lease, CancellationToken cancellationToken, string tag = "[subtitles]")
     {
-        var samples = await Task.Run(
+        var samples = await SubtitleTrace.MeasureAsync(_log, tag, "audio-read", () => Task.Run(
             () => ReadMonoSamples(audioPath, cancellationToken),
-            cancellationToken);
+            cancellationToken), samples => $"samples={samples.Length} sampleRate={SampleRate} channels=1");
         if (samples.Length == 0)
         {
             throw new InvalidOperationException("音频文件没有可识别的采样数据。");
@@ -51,6 +51,7 @@ public sealed class SubtitleAudioProcessor : IAsyncDisposable
         var duration = TimeSpan.FromSeconds((double)samples.Length / SampleRate);
         if (!configuration.Enabled)
         {
+            _log.Info($"{tag} stage=diarization status=skipped reason=disabled");
             return new SubtitleAudioDocument(
                 samples,
                 [new SubtitleSpeakerSegment(0, 0, duration.TotalSeconds)]);
@@ -58,21 +59,28 @@ public sealed class SubtitleAudioProcessor : IAsyncDisposable
 
         if (lease is null) throw new InvalidOperationException("字幕说话人模型尚未准备完成。");
         _log.Info(
-            $"[subtitles] 说话人分离开始：音频={Path.GetFileName(audioPath)}，" +
+            $"{tag} stage=diarization status=queued 说话人分离开始：" +
             $"时长={duration.TotalSeconds:F2}s，线程={lease.Key.Threads}，阈值={configuration.ClusteringThreshold:F2}。");
 
         var started = System.Diagnostics.Stopwatch.StartNew();
         var stableSegments = await lease.ProcessAsync(models =>
         {
+            _log.Info($"{tag} stage=diarization-segment status=start waitMs={started.Elapsed.TotalMilliseconds:F0}");
+            var inference = System.Diagnostics.Stopwatch.StartNew();
             var segments = models.Segment(samples, configuration.ClusteringThreshold);
+            _log.Info($"{tag} stage=diarization-segment status=complete elapsedMs={inference.Elapsed.TotalMilliseconds:F0} parts={segments.Count}");
             // Native inference is synchronous. Wait for it before cancellation/disposal,
             // and never publish cancelled results or mutate the speaker registry with them.
             cancellationToken.ThrowIfCancellationRequested();
-            return AssignStableSpeakers(samples, MergeAdjacent(segments), models, speakerRegistry, cancellationToken);
+            _log.Info($"{tag} stage=speaker-embedding status=start");
+            inference.Restart();
+            var assigned = AssignStableSpeakers(samples, MergeAdjacent(segments), models, speakerRegistry, cancellationToken);
+            _log.Info($"{tag} stage=speaker-embedding status=complete elapsedMs={inference.Elapsed.TotalMilliseconds:F0} speakers={assigned.Select(segment => segment.Speaker).Distinct().Count()}");
+            return assigned;
         }, cancellationToken).ConfigureAwait(false);
         started.Stop();
         _log.Info(
-            $"[subtitles] 说话人分离完成：耗时={started.Elapsed.TotalMilliseconds:F0}ms，" +
+            $"{tag} stage=diarization status=complete 说话人分离完成：耗时={started.Elapsed.TotalMilliseconds:F0}ms，" +
             $"分段={stableSegments.Count}，" +
             $"说话人={stableSegments.Select(segment => segment.Speaker).Distinct().Count()}，" +
             $"会话声纹={speakerRegistry.Count}。");

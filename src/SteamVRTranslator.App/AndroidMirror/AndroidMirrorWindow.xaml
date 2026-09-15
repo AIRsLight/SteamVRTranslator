@@ -20,7 +20,7 @@
             <Setter Property="Width" Value="82" />
             <Setter Property="Height" Value="42" />
             <Setter Property="Margin" Value="8,3" />
-            <Setter Property="Foreground" Value="#EAF4F1" />
+            <Setter Property="Foreground" Value="{steamvr:OverlayBrush Role=Text, Classic=#EAF4F1}" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="1.5" />
@@ -37,11 +37,11 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="steamvr:VrPointerHover.IsHovered" Value="True">
-                                <Setter TargetName="Shell" Property="Background" Value="#2437D7B7" />
-                                <Setter TargetName="Shell" Property="BorderBrush" Value="#FF78EBD2" />
+                                <Setter TargetName="Shell" Property="Background" Value="{steamvr:OverlayBrush Role=Accent, Classic=#2437D7B7}" />
+                                <Setter TargetName="Shell" Property="BorderBrush" Value="{steamvr:OverlayBrush Role=AccentHover, Classic=#FF78EBD2}" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Shell" Property="Background" Value="#5941DABD" />
+                                <Setter TargetName="Shell" Property="Background" Value="{steamvr:OverlayBrush Role=Accent, Classic=#5941DABD}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -74,17 +74,17 @@
                         MaxWidth="330"
                         Padding="18,12"
                         CornerRadius="8"
-                        Background="#D916211D">
+                        Background="{steamvr:OverlayBrush Role=Background, Classic=#D916211D}">
                     <StackPanel>
                         <ProgressBar x:Name="ConnectingProgress"
                                      Height="3"
                                      IsIndeterminate="True"
-                                     Foreground="#2EE58C"
-                                     Background="#33463E"
+                                     Foreground="{steamvr:OverlayBrush Role=Accent, Classic=#2EE58C}"
+                                     Background="{steamvr:OverlayBrush Role=Surface, Classic=#33463E}"
                                      Margin="0,0,0,10" />
                         <TextBlock x:Name="StatusText"
                                    Text="{loc:Loc Key=AndroidMirror.Status.Initializing}"
-                                   Foreground="White"
+                                   Foreground="{steamvr:OverlayBrush Role=Text, Classic=#FFFFFF}"
                                    FontSize="15"
                                    TextAlignment="Center"
                                    TextWrapping="Wrap" />
@@ -92,7 +92,7 @@
                 </Border>
             </Grid>
 
-            <Border Grid.Row="1" Background="#FF101916" BorderBrush="#30495A54" BorderThickness="0,1,0,0">
+            <Border Grid.Row="1" Background="{steamvr:OverlayBrush Role=Background, Classic=#FF101916}" BorderBrush="{steamvr:OverlayBrush Role=Border, Classic=#30495A54}" BorderThickness="0,1,0,0">
                 <UniformGrid Rows="1" Columns="3" HorizontalAlignment="Center">
                     <Button x:Name="BackButton" Tag="Back" Style="{StaticResource NavigationButtonStyle}" Click="NavigationButton_Click">
                         <Path Data="{x:Static local:MaterialIconPaths.AndroidBack}" Width="22" Height="22" Stretch="Uniform" Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />

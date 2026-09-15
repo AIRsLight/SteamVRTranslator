@@ -17,7 +17,8 @@ internal sealed class ProcessLoopbackAudioCapture : ISubtitleAudioCapture
 
     private readonly uint _processId;
     private readonly AppLog _log;
-    private readonly SpeechSegmenter _segmenter = new();
+    private readonly SpeechSegmenter _segmenter;
+    private string _diagnosticTag = "[subtitles]";
     private readonly CancellationTokenSource _cancellation = new();
     private readonly AutoResetEvent _sampleReady = new(false);
     private IAudioClient? _audioClient;
@@ -37,7 +38,11 @@ internal sealed class ProcessLoopbackAudioCapture : ISubtitleAudioCapture
 
         _processId = processId;
         _log = log;
+        _segmenter = new SpeechSegmenter((reason, duration) =>
+            _log.Info($"{_diagnosticTag} stage=segment status=discarded reason=too-short trigger={reason} durationMs={duration.TotalMilliseconds:F0} minimumMs=280"));
     }
+
+    public void SetDiagnosticTag(string tag) => _diagnosticTag = tag;
 
     public event EventHandler<ProcessLoopbackAudioSegment>? SegmentReady;
 
@@ -71,7 +76,8 @@ internal sealed class ProcessLoopbackAudioCapture : ISubtitleAudioCapture
 
         using var starting = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _cancellation.Token);
         starting.Token.ThrowIfCancellationRequested();
-        _audioClient = await ActivateAudioClientAsync(_processId, starting.Token).ConfigureAwait(false);
+        _audioClient = await SubtitleTrace.MeasureAsync(_log, _diagnosticTag, "audio-activate",
+            () => ActivateAudioClientAsync(_processId, starting.Token)).ConfigureAwait(false);
         starting.Token.ThrowIfCancellationRequested();
         var format = WaveFormat.CreateCustomFormat(
             WaveFormatEncoding.Pcm,
@@ -81,6 +87,7 @@ internal sealed class ProcessLoopbackAudioCapture : ISubtitleAudioCapture
             blockAlign: 2 * 2,
             bitsPerSample: 16);
         var formatPointer = Marshal.AllocCoTaskMem(Marshal.SizeOf<WaveFormatEx>());
+        _log.Info($"{_diagnosticTag} stage=audio-initialize status=start format={format}");
         try
         {
             Marshal.StructureToPtr(WaveFormatEx.From(format), formatPointer, false);
@@ -123,7 +130,7 @@ internal sealed class ProcessLoopbackAudioCapture : ISubtitleAudioCapture
             cancellationToken,
             _cancellation.Token);
         _captureTask = Task.Run(() => CaptureLoop(format, linked), CancellationToken.None);
-        _log.Info($"[subtitles] 已开始捕获进程音频：PID={_processId}，格式={format}。");
+        _log.Info($"{_diagnosticTag} stage=audio-initialize status=complete 已开始捕获进程音频：PID={_processId}，格式={format}。 preRollMs=200 endingSilenceMs=650 minimumSegmentMs=280 maximumSegmentMs=12000");
     }
 
     public ValueTask DisposeAsync()
@@ -155,7 +162,7 @@ internal sealed class ProcessLoopbackAudioCapture : ISubtitleAudioCapture
             }
             catch (Exception exception)
             {
-                _log.Error("[subtitles] 停止进程音频捕获时发生错误。", exception);
+                _log.Error($"{_diagnosticTag} 停止进程音频捕获时发生错误。", exception);
             }
         }
 
@@ -173,7 +180,7 @@ internal sealed class ProcessLoopbackAudioCapture : ISubtitleAudioCapture
         _audioClient = null;
         _sampleReady.Dispose();
         _cancellation.Dispose();
-        _log.Info($"[subtitles] 已停止捕获进程音频：PID={_processId}。");
+        _log.Info($"{_diagnosticTag} 已停止捕获进程音频：PID={_processId}。");
     }
 
     private void CaptureLoop(WaveFormat format, CancellationTokenSource linked)
@@ -182,6 +189,7 @@ internal sealed class ProcessLoopbackAudioCapture : ISubtitleAudioCapture
         {
             var waitHandles = new[] { _sampleReady, linked.Token.WaitHandle };
             var clock = Stopwatch.StartNew();
+            var diagnostics = new SubtitleAudioDiagnostics(_log, _diagnosticTag);
             var lastPacket = TimeSpan.Zero;
             try
             {
@@ -192,20 +200,22 @@ internal sealed class ProcessLoopbackAudioCapture : ISubtitleAudioCapture
                         break;
                     }
 
-                    if (DrainPackets(format)) lastPacket = clock.Elapsed;
+                    if (DrainPackets(format, diagnostics, clock)) lastPacket = clock.Elapsed;
                     else if (clock.Elapsed - lastPacket >= TimeSpan.FromSeconds(0.65))
                     {
                         // Some applications stop producing packets entirely after speaking.
                         // Silence must still finish a segment without requiring Stop Listening.
-                        var segment = _segmenter.Flush(format);
+                        var segment = _segmenter.Flush(format, "packet-gap");
                         if (segment is not null) SegmentReady?.Invoke(this, segment);
                         _segmenter.SkipToFrame((long)(clock.Elapsed.TotalSeconds * format.SampleRate));
                     }
+                    diagnostics.Report(clock.Elapsed);
                 }
             }
             finally
             {
-                var final = _segmenter.Flush(format);
+                diagnostics.Report(clock.Elapsed, final: true);
+                var final = _segmenter.Flush(format, linked.IsCancellationRequested ? "capture-stop" : "capture-failed");
                 if (final is not null)
                 {
                     SegmentReady?.Invoke(this, final);
@@ -214,7 +224,7 @@ internal sealed class ProcessLoopbackAudioCapture : ISubtitleAudioCapture
         }
     }
 
-    private bool DrainPackets(WaveFormat format)
+    private bool DrainPackets(WaveFormat format, SubtitleAudioDiagnostics diagnostics, Stopwatch clock)
     {
         if (_captureClient is null)
         {
@@ -232,27 +242,24 @@ internal sealed class ProcessLoopbackAudioCapture : ISubtitleAudioCapture
 
             IntPtr data = IntPtr.Zero;
             uint frames = 0;
+            uint flags;
+            byte[] buffer;
             try
             {
                 Marshal.ThrowExceptionForHR(_captureClient.GetBuffer(
                     out data,
                     out frames,
-                    out var flags,
+                    out flags,
                     out _,
                     out _));
                 var byteCount = checked((int)frames * format.BlockAlign);
                 received = true;
-                var buffer = new byte[byteCount];
+                buffer = new byte[byteCount];
                 if ((flags & SilentBufferFlag) == 0 && data != IntPtr.Zero)
                 {
                     Marshal.Copy(data, buffer, 0, byteCount);
                 }
 
-                var segment = _segmenter.Push(buffer, frames, format);
-                if (segment is not null)
-                {
-                    SegmentReady?.Invoke(this, segment);
-                }
             }
             finally
             {
@@ -261,6 +268,10 @@ internal sealed class ProcessLoopbackAudioCapture : ISubtitleAudioCapture
                     Marshal.ThrowExceptionForHR(_captureClient.ReleaseBuffer(frames));
                 }
             }
+            // Release the native buffer before segmentation, events or disk logging.
+            var rms = diagnostics.Record(buffer, frames, flags, clock.Elapsed);
+            var segment = _segmenter.Push(buffer, frames, format, rms);
+            if (segment is not null) SegmentReady?.Invoke(this, segment);
         }
         return received;
     }
@@ -352,9 +363,8 @@ internal sealed class ProcessLoopbackAudioCapture : ISubtitleAudioCapture
         IActivateAudioInterfaceCompletionHandler completionHandler,
         out IActivateAudioInterfaceAsyncOperation operation);
 
-    private sealed class SpeechSegmenter
+    internal sealed class SpeechSegmenter(Action<string, TimeSpan>? discarded = null)
     {
-        private const double VoiceThreshold = 0.0025;
         private const double PreRollSeconds = 0.20;
         private const double EndingSilenceSeconds = 0.65;
         private const double MinimumSegmentSeconds = 0.28;
@@ -371,9 +381,9 @@ internal sealed class ProcessLoopbackAudioCapture : ISubtitleAudioCapture
         public ProcessLoopbackAudioSegment? Push(
             byte[] data,
             uint frameCount,
-            WaveFormat format)
+            WaveFormat format, double? rms = null)
         {
-            var voiced = HasAudibleSamples(data);
+            var voiced = (rms ?? SubtitleAudioDiagnostics.Level(data).Rms) >= SubtitleAudioDiagnostics.VoiceThreshold;
             if (!_isActive)
             {
                 AddPreRoll(data, frameCount, format.SampleRate);
@@ -409,11 +419,11 @@ internal sealed class ProcessLoopbackAudioCapture : ISubtitleAudioCapture
                 return null;
             }
 
-            return Complete(format);
+            return Complete(format, duration >= MaximumSegmentSeconds ? "maximum-duration" : "ending-silence");
         }
 
-        public ProcessLoopbackAudioSegment? Flush(WaveFormat format) =>
-            _isActive ? Complete(format) : null;
+        public ProcessLoopbackAudioSegment? Flush(WaveFormat format, string reason = "flush") =>
+            _isActive ? Complete(format, reason) : null;
 
         public void SkipToFrame(long frame)
         {
@@ -434,7 +444,7 @@ internal sealed class ProcessLoopbackAudioCapture : ISubtitleAudioCapture
             }
         }
 
-        private ProcessLoopbackAudioSegment? Complete(WaveFormat format)
+        private ProcessLoopbackAudioSegment? Complete(WaveFormat format, string reason)
         {
             var bytes = _active.ToArray();
             var start = TimeSpan.FromSeconds((double)_activeStartFrame / format.SampleRate);
@@ -444,27 +454,10 @@ internal sealed class ProcessLoopbackAudioCapture : ISubtitleAudioCapture
             _activeFrames = 0;
             _silenceFrames = 0;
             _isActive = false;
-            return duration.TotalSeconds >= MinimumSegmentSeconds
-                ? new ProcessLoopbackAudioSegment(bytes, format, start, end)
-                : null;
-        }
-
-        private static bool HasAudibleSamples(byte[] data)
-        {
-            if (data.Length < 2)
-            {
-                return false;
-            }
-
-            double sum = 0;
-            var samples = data.Length / 2;
-            for (var index = 0; index < data.Length - 1; index += 2)
-            {
-                var sample = (short)(data[index] | (data[index + 1] << 8));
-                var normalized = sample / 32768d;
-                sum += normalized * normalized;
-            }
-            return Math.Sqrt(sum / samples) >= VoiceThreshold;
+            if (duration.TotalSeconds >= MinimumSegmentSeconds)
+                return new ProcessLoopbackAudioSegment(bytes, format, start, end, reason);
+            discarded?.Invoke(reason, duration);
+            return null;
         }
     }
 
@@ -651,4 +644,5 @@ internal sealed record ProcessLoopbackAudioSegment(
     byte[] PcmBytes,
     WaveFormat Format,
     TimeSpan Start,
-    TimeSpan End);
+    TimeSpan End,
+    string CompletionReason = "unspecified");

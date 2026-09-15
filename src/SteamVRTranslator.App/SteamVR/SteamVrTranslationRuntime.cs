@@ -15,7 +15,7 @@ using Valve.VR;
 
 namespace SteamVRTranslator.App.SteamVR;
 
-public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOverlayHost
+public sealed partial class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOverlayHost
 {
     private const string GlobalActionSetPath = "/actions/global";
     private const string SelectionActionSetPath = "/actions/selection";
@@ -168,6 +168,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
     public SteamVrTranslationRuntime(AppConfiguration configuration, AppLog log)
     {
         _configuration = configuration;
+        _voiceEcho.SetEnabled(configuration.VrChatVoiceInput.Enabled && configuration.VrChatVoiceInput.TextEchoEnabled);
         _log = log;
         _pipeline = new TranslationPipeline(configuration, log);
         _htmlResultRenderer = new Lazy<HtmlResultRenderer>(
@@ -368,7 +369,8 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         _configuration.AndroidMirror.Enabled,
         _configuration.ShowPointerRay,
         Volatile.Read(ref _pointerSmoothingStrength),
-        _subtitleControlState);
+        _subtitleControlState,
+        _configuration.VrChatVoiceInput.TextEchoEnabled);
 
     public void UpdateExperimentalFeatureAvailability(
         bool subtitlesAvailable,
@@ -536,6 +538,8 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             _ = _voiceInputRecorder.CancelAsync(CancellationToken.None);
             _ = SetVrChatTypingSafeAsync(false, CancellationToken.None);
         }
+
+        ApplyVoiceTextEchoSetting(value.TextEchoEnabled);
 
         var applied = CurrentControlPanelState();
         _log.Info(
@@ -1042,6 +1046,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                     DrainWpfOverlayCommands();
                     DrainDiagnosticResultOverlayCommands();
                     DrainControlPanelSettings();
+                    RefreshOverlayTheme();
                     DrainControlPanelActions(cancellationToken);
                     PollFrame(cancellationToken);
                     DrainDiagnosticWpfPointerCommands();
@@ -1050,6 +1055,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                     await CompleteSubmissionsIfReadyAsync();
                     DrainResultUpdates();
                     RenderInteractiveOverlays();
+                    RenderVoiceEcho();
                     if (diagnosticFrameStartedAt != 0)
                     {
                         var completedAt = Stopwatch.GetTimestamp();
@@ -2774,6 +2780,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         try
         {
             _voiceInputRecorder.Start();
+            _voiceEchoRequest = _voiceEcho.Begin();
             _voiceInputPressed = true;
             _voiceInputCues.Start();
             _log.Info("[voice-input] PTT 按下，开始 VRChat 语音输入录音。");
@@ -2785,6 +2792,9 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             _voiceInputPressed = false;
             _voiceInputCues.Cancel();
             _log.Error("[voice-input] 启动录音失败。", exception);
+            _voiceEchoRequest = _voiceEcho.Begin();
+            _voiceEcho.Update(_voiceEchoRequest, "Voice.Echo.Failed");
+            _voiceEcho.Complete(_voiceEchoRequest, DateTimeOffset.UtcNow);
             if (WasapiErrorClassifier.IsMicrophoneAccessDenied(exception))
             {
                 Publish(
@@ -2801,8 +2811,11 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
 
     private async Task CompleteVrChatVoiceInputAsync(CancellationToken cancellationToken)
     {
+        var echoRequest = _voiceEchoRequest;
+        void EchoSent(OscChatboxEmission emission) => _voiceEcho.Sent(echoRequest, emission);
         // End at PTT release, including short/empty recordings; recognition can take longer.
         _ = _voiceInputCues.EndAsync();
+        _voiceEcho.Update(echoRequest, "Voice.Echo.Recognizing");
         try
         {
             using var audio = await _voiceInputRecorder.StopAsync(cancellationToken);
@@ -2817,6 +2830,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
             }
 
             var sourceText = result.Text.Trim();
+            _voiceEcho.Update(echoRequest, "Voice.Echo.Recognized", sourceText);
             var outputText = sourceText;
             var translationSucceeded = false;
             if (_configuration.VrChatVoiceInput.TranslationEnabled)
@@ -2829,7 +2843,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                     await _vrChatOscOutput.SendAsync(
                         sourceText,
                         oscPlan.SendOriginalImmediately,
-                        cancellationToken);
+                        cancellationToken, EchoSent);
                     _log.Info(
                         $"[voice-input] OSC 已输出待翻译原文：字符={sourceText.Length}，" +
                         $"立即发送={_configuration.VrChatVoiceInput.SendImmediately}，" +
@@ -2837,6 +2851,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                 }
 
                 Publish(L("Voice.Translating"), _selection.Snapshot.State);
+                _voiceEcho.Update(echoRequest, "Voice.Echo.Translating");
                 try
                 {
                     outputText = await _pipeline.TranslateSpeechAsync(
@@ -2851,6 +2866,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
                     _log.Error("[voice-input] 语音翻译失败，将发送原始识别文本。", exception);
+                    _voiceEcho.Update(echoRequest, "Voice.Echo.Fallback");
                     Publish(
                         LF("Voice.TranslationFallback", exception.Message),
                         _selection.Snapshot.State,
@@ -2865,13 +2881,13 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                         {
                             await _vrChatOscOutput.UpdateSubmittedChatboxAsync(
                                 outputText,
-                                cancellationToken);
+                                cancellationToken, EchoSent);
                         }
                         else
                         {
                             await _vrChatOscOutput.SendPreviewAsync(
                                 outputText,
-                                cancellationToken);
+                                cancellationToken, EchoSent);
                         }
                         _log.Info(
                             $"[voice-input] OSC 已用译文更新 Chatbox 输入框：字符={outputText.Length}，" +
@@ -2891,7 +2907,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
                 _configuration.VrChatVoiceInput.TranslationEnabled
                     ? translationPlan.SendTranslationImmediately
                     : _configuration.VrChatVoiceInput.SendImmediately,
-                cancellationToken);
+                cancellationToken, EchoSent);
             _log.Info(
                 $"[voice-input] OSC 已发送：目标={_configuration.VrChatVoiceInput.Host}:" +
                 $"{_configuration.VrChatVoiceInput.Port}，字符={result.Text.Length}，" +
@@ -2902,14 +2918,17 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             _log.Info("[voice-input] VRChat 语音输入已取消。");
+            _voiceEcho.Update(echoRequest, "Voice.Echo.Canceled");
         }
         catch (Exception exception)
         {
             _log.Error("[voice-input] 识别或 OSC 发送失败。", exception);
+            _voiceEcho.Update(echoRequest, "Voice.Echo.Failed");
             Publish(LF("Voice.Failed", exception.Message), _selection.Snapshot.State, true);
         }
         finally
         {
+            _voiceEcho.Complete(echoRequest, DateTimeOffset.UtcNow);
             await SetVrChatTypingSafeAsync(false, CancellationToken.None);
         }
     }
@@ -5162,6 +5181,8 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
 
     private void ShutdownOpenVr()
     {
+        _voiceEcho.Reset();
+        _voiceEchoPlacement.Reset();
         Volatile.Write(ref _currentSceneProcessId, 0);
         if (_openVrInitialized || _connected)
         {
@@ -5231,7 +5252,7 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
         {
             _pipeline.ReleaseOpenVrResources();
             var overlayApi = OpenVR.Overlay;
-            var handles = new[] { _selectionOverlayHandle };
+            var handles = new[] { _selectionOverlayHandle, _voiceEchoOverlayHandle };
             foreach (var handle in handles)
             {
                 if (handle == OpenVR.k_ulOverlayHandleInvalid || overlayApi is null)
@@ -5249,6 +5270,14 @@ public sealed class SteamVrTranslationRuntime : IAsyncDisposable, IWpfSpatialOve
 
         _selectionOverlayTexture?.Dispose();
         _selectionOverlayTexture = null;
+        _voiceEchoTexture?.Dispose();
+        _voiceEchoTexture = null;
+        _voiceEchoOverlayHandle = OpenVR.k_ulOverlayHandleInvalid;
+        _voiceEchoRenderedRevision = 0;
+        _voiceEchoPreparedRevision = 0;
+        _voiceEchoFrame = null;
+        _voiceEchoShown = false;
+        _voiceEchoRenderFailed = false;
         foreach (var overlay in _interactiveOverlays)
         {
             overlay.IsShown = false;

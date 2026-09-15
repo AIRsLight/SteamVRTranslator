@@ -388,6 +388,13 @@ public sealed class WpfSpatialOverlayTests
                 Assert.False(source.PointerUp(togglePointer));
                 Assert.False(voiceToggle.IsChecked);
 
+                VrControlPanelState? echoedState = null;
+                window.SettingsChanged += (_, args) => echoedState = args.State;
+                ClickDirect(window, source, "VoiceTextEchoToggle");
+                Assert.True(echoedState?.TextEchoEnabled);
+                window.ApplyState(echoedState! with { TranslationEnabled = true });
+                Assert.True(Assert.IsType<ToggleButton>(window.FindName("VoiceTextEchoToggle")).IsChecked);
+
                 ClickDirect(window, source, "HomeButton");
                 ClickDirect(window, source, "SubtitleMenuButton");
                 Assert.Equal(1, subtitlesRequested);

@@ -47,9 +47,11 @@ public partial class SubtitleHistoryWindow : Window,
 
     public void SetInteractionHighlighted(bool highlighted)
     {
-        WindowFrame.BorderBrush = highlighted
-            ? new SolidColorBrush(Color.FromRgb(46, 229, 140))
-            : Brushes.Transparent;
+        if (highlighted)
+            WindowFrame.SetBinding(System.Windows.Controls.Border.BorderBrushProperty,
+                OverlayTheme.CreateBinding(OverlayColorRole.Accent, "#2EE58C"));
+        else
+            WindowFrame.BorderBrush = Brushes.Transparent;
         InvalidateOverlay();
     }
 
@@ -138,9 +140,10 @@ public partial class SubtitleHistoryWindow : Window,
         ListenButton.ToolTip = string.IsNullOrWhiteSpace(message)
             ? ListenButtonText.Text
             : message;
-        ListenButton.Foreground = state == SubtitleListeningState.Error
-            ? new SolidColorBrush(Color.FromRgb(255, 139, 139))
-            : new SolidColorBrush(Color.FromRgb(244, 248, 246));
+        ListenButton.SetBinding(System.Windows.Controls.Control.ForegroundProperty,
+            state == SubtitleListeningState.Error
+                ? OverlayTheme.CreateBinding(OverlayColorRole.Danger, "#FF8B8B")
+                : OverlayTheme.CreateBinding(OverlayColorRole.Text, "#F4F8F6"));
         InvalidateOverlay();
     }
 

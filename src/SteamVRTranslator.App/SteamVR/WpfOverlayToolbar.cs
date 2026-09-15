@@ -7,16 +7,16 @@ namespace SteamVRTranslator.App.SteamVR;
 
 internal sealed class WpfOverlayToolbar
 {
-    private static readonly Brush ToolbarBackground =
-        FrozenBrush(Color.FromArgb(210, 52, 56, 59));
-    private static readonly Brush ToolbarBorder =
-        FrozenBrush(Color.FromArgb(220, 235, 238, 240));
-    private static readonly Brush HoverBackground =
-        FrozenBrush(Color.FromArgb(235, 86, 92, 97));
-    private static readonly Brush PressedBackground =
-        FrozenBrush(Color.FromArgb(245, 112, 118, 123));
-    private static readonly Brush RecordingForeground =
-        FrozenBrush(Color.FromRgb(239, 68, 68));
+    private static Brush ToolbarBackground =>
+        FrozenBrush(OverlayTheme.Resolve(OverlayColorRole.Surface, Color.FromArgb(210, 52, 56, 59)));
+    private static Brush ToolbarBorder =>
+        FrozenBrush(OverlayTheme.Resolve(OverlayColorRole.Border, Color.FromArgb(220, 235, 238, 240)));
+    private static Brush HoverBackground =>
+        FrozenBrush(OverlayTheme.Resolve(OverlayColorRole.AccentSoft, Color.FromArgb(235, 86, 92, 97)));
+    private static Brush PressedBackground =>
+        FrozenBrush(OverlayTheme.Resolve(OverlayColorRole.AccentHover, Color.FromArgb(245, 112, 118, 123)));
+    private static Brush RecordingForeground =>
+        FrozenBrush(OverlayTheme.Resolve(OverlayColorRole.Danger, Color.FromRgb(239, 68, 68)));
 
     private readonly Border _root;
     private readonly IReadOnlyList<OverlayToolbarAction> _actions;
@@ -86,7 +86,8 @@ internal sealed class WpfOverlayToolbar
             hoveredAction,
             pointerPressed,
             renderScale,
-            isCommandRecording);
+            isCommandRecording,
+            OverlayTheme.Instance.Revision);
         if (_lastRenderKey == renderKey && _lastRenderedBitmap is not null)
         {
             return _lastRenderedBitmap;
@@ -98,11 +99,13 @@ internal sealed class WpfOverlayToolbar
         {
             button.Width = buttonSize;
             button.Height = buttonSize;
+            button.BorderBrush = ToolbarBorder;
             _iconHosts[action].Width = iconSize;
             _iconHosts[action].Height = iconSize;
             _icons[action].Fill = action == OverlayToolbarAction.CustomCommand && isCommandRecording
                 ? RecordingForeground
-                : Brushes.White;
+                : OverlayTheme.Brush(action == hoveredAction && pointerPressed
+                    ? OverlayColorRole.OnAccent : OverlayColorRole.Text, "#FFFFFF");
             button.Background = action == hoveredAction
                 ? pointerPressed ? PressedBackground : HoverBackground
                 : ToolbarBackground;
@@ -142,7 +145,7 @@ internal sealed class WpfOverlayToolbar
         icon = new ShapePath
         {
             Data = IconGeometry(action),
-            Fill = Brushes.White,
+            Fill = OverlayTheme.Brush(OverlayColorRole.Text, "#FFFFFF"),
             Width = 24,
             Height = 24,
             Stretch = Stretch.None,
@@ -195,5 +198,6 @@ internal sealed class WpfOverlayToolbar
         OverlayToolbarAction? HoveredAction,
         bool PointerPressed,
         int RenderScale,
-        bool IsCommandRecording);
+        bool IsCommandRecording,
+        long ThemeRevision);
 }

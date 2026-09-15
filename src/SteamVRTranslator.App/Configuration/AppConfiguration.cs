@@ -14,6 +14,8 @@ public sealed class AppConfiguration
 
     public string UiLanguage { get; set; } = ApplicationLanguages.English;
 
+    public OverlayAppearanceConfiguration OverlayAppearance { get; set; } = new();
+
     public int HotKeyVirtualKey { get; set; } = 0x77;
 
     public int SelectionTimeoutSeconds { get; set; } = 30;
@@ -777,6 +779,8 @@ public sealed class VrChatVoiceInputConfiguration
     public const int MaximumStreamingChunkIntervalMilliseconds = 10000;
 
     public bool Enabled { get; set; } = true;
+
+    public bool TextEchoEnabled { get; set; }
 
     public VoiceInputCueConfiguration Cues { get; set; } = new();
 

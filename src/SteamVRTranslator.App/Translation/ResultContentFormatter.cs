@@ -1,3 +1,4 @@
+using SteamVRTranslator.App.SteamVR;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows.Documents;
@@ -34,7 +35,7 @@ internal static partial class ResultContentFormatter
         var document = new Markdown().Transform(markdown ?? string.Empty);
         document.FontFamily = new FontFamily("Microsoft YaHei UI");
         document.FontSize = 18;
-        document.Foreground = new SolidColorBrush(Color.FromRgb(244, 248, 246));
+        document.Foreground = new SolidColorBrush(OverlayTheme.Resolve(OverlayColorRole.Text, Color.FromRgb(244, 248, 246)));
         document.PagePadding = new Thickness(14, 12, 10, 12);
         document.ColumnWidth = double.PositiveInfinity;
         return document;

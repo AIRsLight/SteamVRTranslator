@@ -125,6 +125,7 @@ internal sealed class WpfWindowOverlaySource : IDisposable
     private byte[]? _pixelBuffer;
     private int _contentVersion = 1;
     private int _renderedContentVersion;
+    private long _renderedThemeRevision = -1;
     private int _synchronizeBuffersRequested;
     private long _renderedDirectPixelSequence = long.MinValue;
 
@@ -161,7 +162,8 @@ internal sealed class WpfWindowOverlaySource : IDisposable
         TimeSpan.FromSeconds(1d / Options.MaximumFramesPerSecond);
 
     public bool NeedsRender =>
-        Volatile.Read(ref _contentVersion) != Volatile.Read(ref _renderedContentVersion);
+        Volatile.Read(ref _contentVersion) != Volatile.Read(ref _renderedContentVersion) ||
+        OverlayTheme.Instance.Revision != Interlocked.Read(ref _renderedThemeRevision);
 
     public bool SynchronizeBuffersRequested =>
         Volatile.Read(ref _synchronizeBuffersRequested) != 0;
@@ -220,6 +222,7 @@ internal sealed class WpfWindowOverlaySource : IDisposable
     private BitmapSource RenderPixels(int pixelWidth, int pixelHeight, double dpi)
     {
         var renderingVersion = Volatile.Read(ref _contentVersion);
+        var themeRevision = OverlayTheme.Instance.Revision;
         var bitmap = Invoke(() =>
         {
             pixelWidth = Math.Max(1, pixelWidth);
@@ -240,6 +243,7 @@ internal sealed class WpfWindowOverlaySource : IDisposable
             return (BitmapSource)bitmap;
         });
         Volatile.Write(ref _renderedContentVersion, renderingVersion);
+        Interlocked.Exchange(ref _renderedThemeRevision, themeRevision);
         return bitmap;
     }
 

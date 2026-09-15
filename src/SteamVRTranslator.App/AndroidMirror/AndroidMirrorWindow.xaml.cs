@@ -132,9 +132,11 @@ internal partial class AndroidMirrorWindow : Window,
 
     public void SetInteractionHighlighted(bool highlighted)
     {
-        WindowFrame.BorderBrush = highlighted
-            ? new SolidColorBrush(Color.FromRgb(46, 229, 140))
-            : Brushes.Transparent;
+        if (highlighted)
+            WindowFrame.SetBinding(System.Windows.Controls.Border.BorderBrushProperty,
+                OverlayTheme.CreateBinding(OverlayColorRole.Accent, "#2EE58C"));
+        else
+            WindowFrame.BorderBrush = Brushes.Transparent;
         InvalidateOverlay();
     }
 

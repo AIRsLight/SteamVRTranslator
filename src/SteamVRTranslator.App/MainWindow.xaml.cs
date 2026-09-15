@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Net.Http.Headers;
+using System.Reflection;
 using System.Text.Json;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -26,6 +27,9 @@ namespace SteamVRTranslator.App;
 
 public partial class MainWindow : Window
 {
+    private static readonly string AppVersion = typeof(MainWindow).Assembly
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0]
+        ?? typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "unknown";
     internal const string ProjectRepositoryUrl = "https://github.com/AIRsLight/SteamVRTranslator";
 
     private readonly ConfigurationStore _configurationStore = new();
@@ -110,6 +114,7 @@ public partial class MainWindow : Window
         }
 
         AppLocalization.SetLanguage(_configuration.UiLanguage);
+        OverlayTheme.Instance.Apply(_configuration.OverlayAppearance);
         InitializeComponent();
         _desktopVoiceHotKey = new DesktopPushToTalkHotKey();
         _desktopVoiceHotKey.PressedChanged += OnDesktopVoiceHotKeyPressedChanged;
@@ -129,7 +134,7 @@ public partial class MainWindow : Window
         _oscChunkIntervalSaveTimer.Tick += OscChunkIntervalSaveTimer_Tick;
         PopulateControls();
         Loaded += OnLoaded;
-        _log.Info($"控制窗口已启动。版本={typeof(MainWindow).Assembly.GetName().Version}");
+        _log.Info($"控制窗口已启动。版本={AppVersion}");
         _log.Info($"程序目录：{AppContext.BaseDirectory}");
         _log.Info($"配置文件：{_configurationStore.FilePath}");
         _log.Info($"日志文件：{_log.FilePath}");
@@ -681,7 +686,7 @@ public partial class MainWindow : Window
         foreach (var button in buttons)
         {
             button.Background = Brushes.Transparent;
-            button.Foreground = new SolidColorBrush(Color.FromRgb(223, 227, 234));
+            button.Foreground = OverlayTheme.LiveBrush(OverlayColorRole.Text, "#DFE3EA");
         }
 
         var active = page switch
@@ -694,8 +699,8 @@ public partial class MainWindow : Window
             "diagnostics" => DiagnosticsNavButton,
             _ => CaptureNavButton
         };
-        active.Background = new SolidColorBrush(Color.FromRgb(61, 115, 230));
-        active.Foreground = Brushes.White;
+        active.Background = OverlayTheme.LiveBrush(OverlayColorRole.Accent, "#3D73E6");
+        active.Foreground = OverlayTheme.LiveBrush(OverlayColorRole.OnAccent, "#FFFFFF");
 
         (PageTitleText.Text, PageContextText.Text) = page switch
         {
@@ -861,7 +866,7 @@ public partial class MainWindow : Window
         catch (Exception exception)
         {
             ProviderConnectionText.Text = exception.Message;
-            ProviderConnectionText.Foreground = new SolidColorBrush(Color.FromRgb(177, 47, 52));
+            ProviderConnectionText.Foreground = OverlayTheme.LiveBrush(OverlayColorRole.Danger, "#B12F34");
             _log.Error($"[configuration] 无法启用 Provider：{provider.DisplayName}。", exception);
             UpdateProviderActiveState();
             return false;
@@ -873,7 +878,7 @@ public partial class MainWindow : Window
         if (!provider.IsMock)
         {
             ProviderConnectionText.Text = AppLocalization.Format("Provider.Connection.Enabled", provider.DisplayName);
-            ProviderConnectionText.Foreground = new SolidColorBrush(Color.FromRgb(8, 126, 114));
+            ProviderConnectionText.Foreground = OverlayTheme.LiveBrush(OverlayColorRole.Accent, "#087E72");
         }
         UpdateActiveProviderSummary();
         return true;
@@ -994,7 +999,7 @@ public partial class MainWindow : Window
     {
         _promptSettingsDirty = true;
         PromptSaveStatusText.Text = T("Prompt.Waiting");
-        PromptSaveStatusText.Foreground = new SolidColorBrush(Color.FromRgb(102, 112, 106));
+        PromptSaveStatusText.Foreground = OverlayTheme.LiveBrush(OverlayColorRole.MutedText, "#66706A");
         _promptSaveTimer.Stop();
         _promptSaveTimer.Start();
     }
@@ -1075,14 +1080,14 @@ public partial class MainWindow : Window
             _promptSettingsDirty = !saved;
             PromptSaveStatusText.Text = saved ? T("Prompt.Saved") : T("Prompt.SaveFailed");
             PromptSaveStatusText.Foreground = saved
-                ? new SolidColorBrush(Color.FromRgb(8, 126, 114))
-                : new SolidColorBrush(Color.FromRgb(177, 47, 52));
+                ? OverlayTheme.LiveBrush(OverlayColorRole.Accent, "#087E72")
+                : OverlayTheme.LiveBrush(OverlayColorRole.Danger, "#B12F34");
         }
         catch (Exception exception)
         {
             _log.Error("[configuration] 更新提示词失败。", exception);
             PromptSaveStatusText.Text = AppLocalization.Format("Prompt.NotSaved", exception.Message);
-            PromptSaveStatusText.Foreground = new SolidColorBrush(Color.FromRgb(177, 47, 52));
+            PromptSaveStatusText.Foreground = OverlayTheme.LiveBrush(OverlayColorRole.Danger, "#B12F34");
             ShowConfigurationError(exception.Message);
         }
     }
@@ -1112,7 +1117,7 @@ public partial class MainWindow : Window
         ProviderListBox.Items.Refresh();
         UpdateActiveProviderSummary();
         ProviderConnectionText.Text = T("Provider.Connection.Changed");
-        ProviderConnectionText.Foreground = new SolidColorBrush(Color.FromRgb(102, 112, 106));
+        ProviderConnectionText.Foreground = OverlayTheme.LiveBrush(OverlayColorRole.MutedText, "#66706A");
     }
 
     private void ProviderNameTextBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -1137,7 +1142,7 @@ public partial class MainWindow : Window
 
         UpdateSelectedProviderFromControls();
         ProviderConnectionText.Text = T("Provider.Connection.KeyChanged");
-        ProviderConnectionText.Foreground = new SolidColorBrush(Color.FromRgb(102, 112, 106));
+        ProviderConnectionText.Foreground = OverlayTheme.LiveBrush(OverlayColorRole.MutedText, "#66706A");
     }
 
     private void ProviderTypeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1185,7 +1190,7 @@ public partial class MainWindow : Window
         ProviderListBox.Items.Refresh();
         UpdateActiveProviderSummary();
         ProviderConnectionText.Text = T("Provider.Connection.Changed");
-        ProviderConnectionText.Foreground = new SolidColorBrush(Color.FromRgb(102, 112, 106));
+        ProviderConnectionText.Foreground = OverlayTheme.LiveBrush(OverlayColorRole.MutedText, "#66706A");
     }
 
     private void ProviderModelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1310,7 +1315,7 @@ public partial class MainWindow : Window
         UpdateSelectedProviderFromControls();
         RefreshProviderButton.IsEnabled = false;
         ProviderConnectionText.Text = T("Provider.Connection.Connecting");
-        ProviderConnectionText.Foreground = new SolidColorBrush(Color.FromRgb(102, 112, 106));
+        ProviderConnectionText.Foreground = OverlayTheme.LiveBrush(OverlayColorRole.MutedText, "#66706A");
         try
         {
             var models = selected.IsGoogleAiStudio
@@ -1331,14 +1336,14 @@ public partial class MainWindow : Window
             ProviderListBox.Items.Refresh();
             UpdateActiveProviderSummary();
             ProviderConnectionText.Text = AppLocalization.Format("Provider.Connection.Success", models.Count);
-            ProviderConnectionText.Foreground = new SolidColorBrush(Color.FromRgb(8, 126, 114));
+            ProviderConnectionText.Foreground = OverlayTheme.LiveBrush(OverlayColorRole.Accent, "#087E72");
             _log.Info($"[provider] 模型发现成功：BaseUrl={selected.BaseUrl}，数量={models.Count}，模型={selected.Model}");
         }
         catch (Exception exception)
         {
             _populatingProvider = false;
             ProviderConnectionText.Text = exception.Message;
-            ProviderConnectionText.Foreground = new SolidColorBrush(Color.FromRgb(177, 47, 52));
+            ProviderConnectionText.Foreground = OverlayTheme.LiveBrush(OverlayColorRole.Danger, "#B12F34");
             _log.Error($"[provider] 模型发现失败：BaseUrl={selected.BaseUrl}", exception);
         }
         finally
@@ -1633,7 +1638,7 @@ public partial class MainWindow : Window
             StartButtonIcon.Data = MaterialIconPaths.Play;
             StateText.Text = "IDLE";
             StatusText.Visibility = Visibility.Collapsed;
-            RuntimeDot.Fill = new SolidColorBrush(Color.FromRgb(157, 165, 159));
+            RuntimeDot.Fill = OverlayTheme.LiveBrush(OverlayColorRole.MutedText, "#9DA59F");
             TestSelectionButton.IsEnabled = false;
             BindingsButton.IsEnabled = false;
             WpfOverlayButton.IsEnabled = false;
@@ -1659,11 +1664,11 @@ public partial class MainWindow : Window
             StatusText.Text = e.Message;
             StatusText.Visibility = e.IsError ? Visibility.Visible : Visibility.Collapsed;
             StatusText.Foreground = e.IsError
-                ? new SolidColorBrush(Color.FromRgb(177, 47, 52))
-                : new SolidColorBrush(Color.FromRgb(82, 96, 90));
+                ? OverlayTheme.LiveBrush(OverlayColorRole.Danger, "#B12F34")
+                : OverlayTheme.LiveBrush(OverlayColorRole.MutedText, "#52605A");
             RuntimeDot.Fill = e.IsError
-                ? new SolidColorBrush(Color.FromRgb(177, 47, 52))
-                : new SolidColorBrush(Color.FromRgb(8, 126, 114));
+                ? OverlayTheme.LiveBrush(OverlayColorRole.Danger, "#B12F34")
+                : OverlayTheme.LiveBrush(OverlayColorRole.Accent, "#087E72");
             StateText.Text = e.State.ToString().ToUpperInvariant();
             if (e.ErrorKind == SteamVrRuntimeErrorKind.MicrophoneAccessDenied)
             {
@@ -1726,6 +1731,7 @@ public partial class MainWindow : Window
             {
                 var state = e.State;
                 _configuration.VrChatVoiceInput.Enabled = state.VoiceEnabled;
+                _configuration.VrChatVoiceInput.TextEchoEnabled = state.TextEchoEnabled;
                 _configuration.VrChatVoiceInput.TranslationEnabled = state.TranslationEnabled;
                 _configuration.VrChatVoiceInput.SendImmediately = state.SendImmediately;
                 _configuration.VrChatVoiceInput.TranslationDisplayMode =
@@ -1740,6 +1746,7 @@ public partial class MainWindow : Window
                         state.PointerSmoothingStrength);
 
                 VoiceInputEnabledCheckBox.IsChecked = state.VoiceEnabled;
+                VoiceTextEchoCheckBox.IsChecked = state.TextEchoEnabled;
                 VoiceTranslationEnabledCheckBox.IsChecked = state.TranslationEnabled;
                 OscSendImmediatelyCheckBox.IsChecked = state.SendImmediately;
                 SelectByTag(VoiceTranslationDisplayModeComboBox, state.DisplayMode);
@@ -1946,8 +1953,9 @@ public partial class MainWindow : Window
 
     private void PopulateControls()
     {
-        VersionText.Text = $"v{typeof(MainWindow).Assembly.GetName().Version?.ToString(3)}";
+        VersionText.Text = $"v{AppVersion}";
         SelectByTag(UiLanguageComboBox, _configuration.UiLanguage);
+        PopulateAppearanceControls();
         SelectByTag(StereoCompositionComboBox, NormalizeCaptureEye(_configuration.StereoCompositionMode));
         InvertResultScrollCheckBox.IsChecked = _configuration.InvertResultScroll;
         ShowPointerRayCheckBox.IsChecked = _configuration.ShowPointerRay;
@@ -1982,6 +1990,7 @@ public partial class MainWindow : Window
         UpdateVirtualMicrophoneUi();
         PopulateAsrEngines();
         VoiceInputEnabledCheckBox.IsChecked = _configuration.VrChatVoiceInput.Enabled;
+        VoiceTextEchoCheckBox.IsChecked = _configuration.VrChatVoiceInput.TextEchoEnabled;
         DesktopVoiceHotKeyEnabledCheckBox.IsChecked =
             _configuration.VrChatVoiceInput.DesktopHotKeyEnabled;
         UpdateDesktopVoiceHotKeyButton();
@@ -2195,6 +2204,14 @@ public partial class MainWindow : Window
         }
     }
 
+    private void VoiceTextEcho_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded || _applyingVrControlPanelSettings) return;
+        _configuration.VrChatVoiceInput.TextEchoEnabled = VoiceTextEchoCheckBox.IsChecked == true;
+        _runtime?.ApplyVoiceTextEchoSetting(_configuration.VrChatVoiceInput.TextEchoEnabled);
+        SaveConfigurationSafely("语音文本回显");
+    }
+
     private void DesktopVoiceHotKey_Changed(object sender, RoutedEventArgs e)
     {
         if (!IsLoaded)
@@ -2348,6 +2365,7 @@ public partial class MainWindow : Window
         return new AppConfiguration
         {
             UiLanguage = ApplicationLanguages.Normalize(SelectedTag(UiLanguageComboBox)),
+            OverlayAppearance = _configuration.OverlayAppearance with { },
             HotKeyVirtualKey = _configuration.HotKeyVirtualKey,
             SelectionTimeoutSeconds = _configuration.SelectionTimeoutSeconds,
             CaptureDirectory = _configuration.CaptureDirectory,
@@ -2384,6 +2402,7 @@ public partial class MainWindow : Window
             VrChatVoiceInput = new VrChatVoiceInputConfiguration
             {
                 Enabled = voiceEnabled,
+                TextEchoEnabled = VoiceTextEchoCheckBox.IsChecked == true,
                 Cues = ReadVoiceCueControls(),
                 DesktopHotKeyEnabled = DesktopVoiceHotKeyEnabledCheckBox.IsChecked == true,
                 DesktopHotKeyVirtualKey = _configuration.VrChatVoiceInput.DesktopHotKeyVirtualKey,
@@ -2588,8 +2607,8 @@ public partial class MainWindow : Window
                 ? "AndroidMirror.Runtime.Installed"
                 : "AndroidMirror.Runtime.SoftwareOnly");
         AndroidMirrorRuntimeStatusText.Foreground = installed && hardwareInstalled
-            ? new SolidColorBrush(Color.FromRgb(8, 126, 114))
-            : new SolidColorBrush(Color.FromRgb(154, 90, 0));
+            ? OverlayTheme.LiveBrush(OverlayColorRole.Accent, "#087E72")
+            : OverlayTheme.LiveBrush(OverlayColorRole.Warning, "#9A5A00");
         DownloadAndroidMirrorRuntimeButton.IsEnabled =
             (!installed || !hardwareInstalled) && _androidMirrorSession is null;
         UpdateAndroidMirrorStartAvailability();
@@ -2652,7 +2671,7 @@ public partial class MainWindow : Window
         if (!isMock)
         {
             ProviderConnectionText.Text = T("Provider.NotTested");
-            ProviderConnectionText.Foreground = new SolidColorBrush(Color.FromRgb(102, 112, 106));
+            ProviderConnectionText.Foreground = OverlayTheme.LiveBrush(OverlayColorRole.MutedText, "#66706A");
         }
         DeleteProviderButton.IsEnabled = !isMock && _runtime is null;
         UpdateProviderActiveState();
@@ -2774,8 +2793,8 @@ public partial class MainWindow : Window
                 "Asr.Missing",
                 string.Join(separator, statuses.Where(status => !status.Installed).Select(LocalizeAsrAssetName)));
         AsrInstallStatusText.Foreground = installed == statuses.Count
-            ? new SolidColorBrush(Color.FromRgb(8, 126, 114))
-            : new SolidColorBrush(Color.FromRgb(154, 90, 0));
+            ? OverlayTheme.LiveBrush(OverlayColorRole.Accent, "#087E72")
+            : OverlayTheme.LiveBrush(OverlayColorRole.Warning, "#9A5A00");
     }
 
     private static string LocalizeAsrAssetName(SenseVoiceAssetStatus status) => status.Id switch
@@ -3381,6 +3400,7 @@ public partial class MainWindow : Window
         new()
         {
             UiLanguage = configuration.UiLanguage,
+            OverlayAppearance = configuration.OverlayAppearance with { },
             HotKeyVirtualKey = configuration.HotKeyVirtualKey,
             SelectionTimeoutSeconds = configuration.SelectionTimeoutSeconds,
             CaptureDirectory = configuration.CaptureDirectory,
@@ -3426,6 +3446,7 @@ public partial class MainWindow : Window
             VrChatVoiceInput = new VrChatVoiceInputConfiguration
             {
                 Enabled = configuration.VrChatVoiceInput.Enabled,
+                TextEchoEnabled = configuration.VrChatVoiceInput.TextEchoEnabled,
                 Cues = configuration.VrChatVoiceInput.Cues.Clone(),
                 DesktopHotKeyEnabled = configuration.VrChatVoiceInput.DesktopHotKeyEnabled,
                 DesktopHotKeyVirtualKey =
@@ -3500,7 +3521,7 @@ public partial class MainWindow : Window
         {
             _log.Error("[subtitles] 保存字幕设置失败。", exception);
             SubtitleReplayStatusText.Text = exception.Message;
-            SubtitleReplayStatusText.Foreground = new SolidColorBrush(Color.FromRgb(177, 47, 52));
+            SubtitleReplayStatusText.Foreground = OverlayTheme.LiveBrush(OverlayColorRole.Danger, "#B12F34");
         }
     }
 
@@ -3520,7 +3541,7 @@ public partial class MainWindow : Window
             {
                 await ValidateSubtitleExperimentalEnvironmentAsync();
                 SubtitleReplayStatusText.Text = T("Subtitle.Experimental.Ready");
-                SubtitleReplayStatusText.Foreground = new SolidColorBrush(Color.FromRgb(8, 126, 114));
+                SubtitleReplayStatusText.Foreground = OverlayTheme.LiveBrush(OverlayColorRole.Accent, "#087E72");
             }
             else
             {
@@ -3538,7 +3559,7 @@ public partial class MainWindow : Window
             _log.Error("[subtitles] 启用实验性实时字幕失败。", exception);
             SaveConfigurationSafely("实时字幕实验性功能验证失败");
             SubtitleReplayStatusText.Text = exception.Message;
-            SubtitleReplayStatusText.Foreground = new SolidColorBrush(Color.FromRgb(177, 47, 52));
+            SubtitleReplayStatusText.Foreground = OverlayTheme.LiveBrush(OverlayColorRole.Danger, "#B12F34");
             ShowExperimentalFeatureError(exception.Message);
             ApplyExperimentalFeatureAvailability();
         }
@@ -3560,7 +3581,7 @@ public partial class MainWindow : Window
             VibeVoiceServiceStatusText.Text = AppLocalization.Format(
                 "Subtitle.Asr.Connected",
                 description);
-            VibeVoiceServiceStatusText.Foreground = new SolidColorBrush(Color.FromRgb(8, 126, 114));
+            VibeVoiceServiceStatusText.Foreground = OverlayTheme.LiveBrush(OverlayColorRole.Accent, "#087E72");
             return;
         }
 
@@ -3678,7 +3699,7 @@ public partial class MainWindow : Window
     private async void TestVibeVoiceServiceButton_Click(object sender, RoutedEventArgs e)
     {
         TestVibeVoiceServiceButton.IsEnabled = false;
-        VibeVoiceServiceStatusText.Foreground = new SolidColorBrush(Color.FromRgb(82, 96, 90));
+        VibeVoiceServiceStatusText.Foreground = OverlayTheme.LiveBrush(OverlayColorRole.MutedText, "#52605A");
         VibeVoiceServiceStatusText.Text = T("Subtitle.Asr.Testing");
         try
         {
@@ -3687,7 +3708,7 @@ public partial class MainWindow : Window
             VibeVoiceServiceStatusText.Text = AppLocalization.Format(
                 "Subtitle.Asr.Connected",
                 description);
-            VibeVoiceServiceStatusText.Foreground = new SolidColorBrush(Color.FromRgb(8, 126, 114));
+            VibeVoiceServiceStatusText.Foreground = OverlayTheme.LiveBrush(OverlayColorRole.Accent, "#087E72");
             SaveConfigurationSafely("VibeVoice API 设置");
         }
         catch (Exception exception)
@@ -3695,7 +3716,7 @@ public partial class MainWindow : Window
             VibeVoiceServiceStatusText.Text = AppLocalization.Format(
                 "Subtitle.Asr.ConnectionFailed",
                 exception.Message);
-            VibeVoiceServiceStatusText.Foreground = new SolidColorBrush(Color.FromRgb(177, 47, 52));
+            VibeVoiceServiceStatusText.Foreground = OverlayTheme.LiveBrush(OverlayColorRole.Danger, "#B12F34");
             _log.Error("[subtitles] VibeVoice API 连接测试失败。", exception);
         }
         finally
@@ -3742,7 +3763,7 @@ public partial class MainWindow : Window
             VibeVoiceServiceStatusText.Text = AppLocalization.Format(
                 "Subtitle.Asr.ManagerFailed",
                 exception.Message);
-            VibeVoiceServiceStatusText.Foreground = new SolidColorBrush(Color.FromRgb(177, 47, 52));
+            VibeVoiceServiceStatusText.Foreground = OverlayTheme.LiveBrush(OverlayColorRole.Danger, "#B12F34");
             _log.Error("[subtitles] 打开 VibeVoice 服务管理器失败。", exception);
         }
         finally
@@ -3915,7 +3936,7 @@ public partial class MainWindow : Window
             CancelSubtitleReplayButton.IsEnabled = true;
             SubtitleReplayProgressBar.Value = 0;
             SubtitleReplayProgressBar.Visibility = Visibility.Visible;
-            SubtitleReplayStatusText.Foreground = new SolidColorBrush(Color.FromRgb(82, 96, 90));
+            SubtitleReplayStatusText.Foreground = OverlayTheme.LiveBrush(OverlayColorRole.MutedText, "#52605A");
             SubtitleReplayStatusText.Text = AppLocalization.Format(
                 "Subtitle.Replay.Running",
                 Path.GetFileName(dialog.FileName));
@@ -3938,7 +3959,7 @@ public partial class MainWindow : Window
         catch (Exception exception)
         {
             _log.Error("[subtitles] 音频文件重放失败。", exception);
-            SubtitleReplayStatusText.Foreground = new SolidColorBrush(Color.FromRgb(177, 47, 52));
+            SubtitleReplayStatusText.Foreground = OverlayTheme.LiveBrush(OverlayColorRole.Danger, "#B12F34");
             SubtitleReplayStatusText.Text = exception.Message;
             MessageBox.Show(
                 this,
@@ -4380,8 +4401,8 @@ public partial class MainWindow : Window
                 "Subtitle.Diarization.Missing",
                 string.Join(", ", statuses.Where(status => !status.Installed).Select(status => status.DisplayName)));
         SubtitleModelStatusText.Foreground = installed == statuses.Count
-            ? new SolidColorBrush(Color.FromRgb(8, 126, 114))
-            : new SolidColorBrush(Color.FromRgb(154, 90, 0));
+            ? OverlayTheme.LiveBrush(OverlayColorRole.Accent, "#087E72")
+            : OverlayTheme.LiveBrush(OverlayColorRole.Warning, "#9A5A00");
     }
 
     private static string NormalizeSubtitleThreadSelection(int value)
@@ -4406,8 +4427,8 @@ public partial class MainWindow : Window
     {
         StatusText.Text = message;
         StatusText.Visibility = Visibility.Visible;
-        StatusText.Foreground = new SolidColorBrush(Color.FromRgb(177, 47, 52));
-        RuntimeDot.Fill = new SolidColorBrush(Color.FromRgb(177, 47, 52));
+        StatusText.Foreground = OverlayTheme.LiveBrush(OverlayColorRole.Danger, "#B12F34");
+        RuntimeDot.Fill = OverlayTheme.LiveBrush(OverlayColorRole.Danger, "#B12F34");
     }
 
     private static void ValidateActiveProvider(TranslationConfiguration translation)

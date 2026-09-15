@@ -38,9 +38,11 @@ public sealed class VrChatOscOutput : IDisposable
     public async Task SendAsync(
         string text,
         bool sendImmediately,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action<OscChatboxEmission>? onSent = null)
     {
         var stream = PlanStream(text);
+        var index = 0;
         foreach (var chunk in stream)
         {
             if (chunk.DelayBefore > TimeSpan.Zero)
@@ -50,34 +52,37 @@ public sealed class VrChatOscOutput : IDisposable
 
             var packet = OscChatboxMessage.Create(chunk.Text, sendImmediately);
             await _client.SendAsync(packet, _endpoint, cancellationToken);
+            onSent?.Invoke(new(chunk.Text, sendImmediately, ++index, stream.Count, false));
         }
     }
 
-    public Task UpdateSubmittedChatboxAsync(
+    public async Task UpdateSubmittedChatboxAsync(
         string text,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action<OscChatboxEmission>? onSent = null)
     {
         var visibleText = TextChunker.Tail(text, _configuration.MaxChatboxCharacters);
-        return visibleText.Length == 0
-            ? Task.CompletedTask
-            : _client.SendAsync(
+        if (visibleText.Length == 0) return;
+        await _client.SendAsync(
                 OscChatboxMessage.Create(
                     visibleText,
                     sendImmediately: true,
                     notificationSfx: false),
                 _endpoint,
-                cancellationToken).AsTask();
+                cancellationToken);
+        onSent?.Invoke(new(visibleText, true, 1, 1, true));
     }
 
-    public Task SendPreviewAsync(string text, CancellationToken cancellationToken = default)
+    public async Task SendPreviewAsync(string text, CancellationToken cancellationToken = default,
+        Action<OscChatboxEmission>? onSent = null)
     {
         var preview = PlanPreview(text);
-        return preview.Length == 0
-            ? Task.CompletedTask
-            : _client.SendAsync(
+        if (preview.Length == 0) return;
+        await _client.SendAsync(
                 OscChatboxMessage.Create(preview, sendImmediately: false),
                 _endpoint,
-                cancellationToken).AsTask();
+                cancellationToken);
+        onSent?.Invoke(new(preview, false, 1, 1, false));
     }
 
     public void UpdateStreamingChunkInterval(int milliseconds)
@@ -131,6 +136,8 @@ internal static class OscChatboxStream
 }
 
 internal readonly record struct OscChatboxStreamChunk(string Text, TimeSpan DelayBefore);
+
+public sealed record OscChatboxEmission(string Text, bool SendImmediately, int ChunkNumber, int ChunkCount, bool IsUpdate);
 
 internal readonly record struct VoiceTranslationOscPlan(
     bool ShowOriginal,
